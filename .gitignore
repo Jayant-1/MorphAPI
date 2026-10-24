@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.morphapi_evidence/
+.pytest_cache/

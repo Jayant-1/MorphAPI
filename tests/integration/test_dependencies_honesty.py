@@ -9,7 +9,8 @@ import pytest
 from morphapi.browser.extractor import BrowserExtractor
 from morphapi.browser.playwright_manager import PlaywrightManager
 from morphapi.browser.url_policy import UrlPolicyService
-from morphapi.schemas.endpoint import CandidateSubmitRequest, CandidateVerifyRequest
+from morphapi.db.migrations import run_migrations
+from morphapi.schemas.endpoint import CandidateSubmitRequest, CandidateVerifyRequest, EndpointCreateRequest
 from morphapi.schemas.errors import FailureCode, MorphApiError
 from morphapi.services.endpoint_service import EndpointService
 from morphapi.services.validation_service import ValidationService
@@ -48,22 +49,33 @@ async def test_unreachable_target_fails_honestly_without_fake_success():
 
 
 @pytest.mark.asyncio
-async def test_broken_selectors_fail_verification_honestly(test_http_server, local_url_policy):
+async def test_broken_selectors_fail_verification_honestly(tmp_path, test_http_server, local_url_policy):
     """
     Verifies that testing broken selectors on a live rendered page fails honestly,
     recording 0 matches and refusing to verify or promote the candidate.
     """
+    test_db = str(tmp_path / "honesty_test.db")
+    await run_migrations(db_path=test_db)
+
+    from morphapi.db.repository import EndpointRepository, VersionRepository
+    ep_repo = EndpointRepository(db_path=test_db)
+    ver_repo = VersionRepository(db_path=test_db)
+
     manager = PlaywrightManager(headless=True, url_policy=local_url_policy)
     extractor = BrowserExtractor(manager=manager)
     validator = ValidationService()
-    service = EndpointService(browser_extractor=extractor, validation_service=validator)
+    service = EndpointService(
+        endpoint_repo=ep_repo,
+        version_repo=ver_repo,
+        browser_extractor=extractor,
+        validation_service=validator,
+    )
 
     target_url = f"{test_http_server}/product"
     schema = {"title": "str", "price": "float"}
     broken_selectors = {"title": "h1.nonexistent-class", "price": "div.missing-price"}
 
     try:
-        from morphapi.schemas.endpoint import EndpointCreateRequest
         ep = await service.create_endpoint_draft(
             EndpointCreateRequest(
                 name="Honest Fail Test",
@@ -107,4 +119,5 @@ async def test_nim_fails_honestly_when_unconfigured():
         await provider.create_chat_completion(messages=[{"role": "user", "content": "hello"}])
 
     assert exc_info.value.code == FailureCode.NIM_CONFIG_ERROR
-    assert "missing" in exc_info.value.message.lower() or "api key" in exc_info.value.message.lower()
+    msg = exc_info.value.message.lower()
+    assert "not configured" in msg or "missing" in msg or "api_key" in msg

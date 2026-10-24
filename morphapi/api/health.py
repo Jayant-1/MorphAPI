@@ -3,7 +3,6 @@ MorphAPI Health & Readiness Endpoints
 Distinguishes service liveness from dependency readiness (FR-063).
 """
 
-import aiosqlite
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 from morphapi.config import settings
@@ -37,15 +36,18 @@ async def readiness_check():
     }
 
     is_ready = True
+    conn = None
     try:
         conn = await get_db_connection()
-        async with conn:
-            cursor = await conn.execute("SELECT 1")
-            await cursor.fetchone()
+        cursor = await conn.execute("SELECT 1")
+        await cursor.fetchone()
         dependencies["database"] = "ready"
     except Exception as e:
         dependencies["database"] = f"unreachable: {str(e)}"
         is_ready = False
+    finally:
+        if conn:
+            await conn.close()
 
     status_code = status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(

@@ -64,24 +64,32 @@ class SelectorTester:
             for i in range(inspect_count):
                 elem = locator.nth(i)
                 try:
-                    # Check visibility on first element
+                    # Extract tag name
+                    curr_tag = await elem.evaluate("el => el.tagName.toLowerCase()")
                     if i == 0:
                         is_visible = await elem.is_visible()
-                        # Extract tag name via evaluate
-                        tag_name = await elem.evaluate("el => el.tagName.toLowerCase()")
+                        tag_name = curr_tag
 
-                    # Extract inner text or relevant value
-                    text = await elem.inner_text()
-                    text = text.strip() if text else ""
+                    # If field expects a URL or element is an anchor/source, extract fully qualified link
+                    is_link_field = any(k in field_name.lower() for k in ("link", "url", "href", "doc", "file", "download", "pdf")) or curr_tag == "a" or selector.strip().endswith("a")
 
-                    if not text:
-                        # Fallback to attribute checks (value, href, src)
-                        text = (
-                            await elem.get_attribute("value")
-                            or await elem.get_attribute("href")
-                            or await elem.get_attribute("src")
-                            or ""
-                        ).strip()
+                    if is_link_field and curr_tag == "a":
+                        href = await elem.evaluate("el => el.href || el.getAttribute('href') || ''")
+                        text = href.strip() if href else ""
+                        if not text:
+                            raw_text = await elem.inner_text()
+                            text = raw_text.strip() if raw_text else ""
+                    else:
+                        raw_text = await elem.inner_text()
+                        text = raw_text.strip() if raw_text else ""
+                        if not text:
+                            # Fallback to attribute checks (value, href, src)
+                            text = (
+                                await elem.get_attribute("value")
+                                or await elem.get_attribute("href")
+                                or await elem.get_attribute("src")
+                                or ""
+                            ).strip()
 
                     samples.append(text)
                 except Exception as ex:

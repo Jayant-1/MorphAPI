@@ -48,7 +48,7 @@ class BrowserExtractor:
         start_time = time.monotonic()
         try:
             # 1. Collect field evidence
-            evidences = await self.tester.test_all_selectors(page, selector_map)
+            evidences = await self.tester.test_all_selectors(page, selector_map, max_samples=100)
 
             # 2. Check for missing or broken selectors
             missing_fields: list[str] = []

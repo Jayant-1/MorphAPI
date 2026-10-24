@@ -10,18 +10,23 @@ from httpx import ASGITransport, AsyncClient
 from morphapi.app import app
 from morphapi.config import settings
 from morphapi.db.migrations import run_migrations
+from morphapi.services.endpoint_service import endpoint_service
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def init_test_db(tmp_path, monkeypatch):
     test_db = str(tmp_path / "test_api.db")
     monkeypatch.setattr(settings, "db_path", test_db)
+    endpoint_service.endpoint_repo.db_path = test_db
+    endpoint_service.version_repo.db_path = test_db
+    endpoint_service.auditor.repo.db_path = test_db
     await run_migrations(db_path=test_db)
 
 
 @pytest.mark.asyncio
 async def test_health_and_readiness_endpoints():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Liveness
         resp = await client.get("/health")
         assert resp.status_code == 200
@@ -37,7 +42,8 @@ async def test_health_and_readiness_endpoints():
 
 @pytest.mark.asyncio
 async def test_endpoint_lifecycle_via_rest():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         # 1. Create Draft Endpoint (FR-001, FR-002, FR-003)
         create_payload = {
             "name": "Book Catalog API",
@@ -80,7 +86,9 @@ async def test_endpoint_lifecycle_via_rest():
         activate_payload = {"version_id": version_id}
         bad_act = await client.post(f"/api/v1/endpoints/{endpoint_id}/activate", json=activate_payload)
         assert bad_act.status_code == 422
-        assert "INVALID_CANDIDATE" in bad_act.json()["error_code"]
+        bad_act_data = bad_act.json()
+        assert bad_act_data["error_code"] == "INVALID_CANDIDATE"
+        assert "Cannot activate" in bad_act_data["message"]
 
         # 6. Verify candidate with sample data
         verify_payload = {

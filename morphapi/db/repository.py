@@ -627,8 +627,13 @@ class AuditRepository:
         conn = await get_db_connection(self.db_path)
         try:
             cursor = await conn.execute(
-                "SELECT * FROM audit_events WHERE target_id = ? ORDER BY audit_id DESC LIMIT ?",
-                (target_id, limit),
+                """
+                SELECT * FROM audit_events 
+                WHERE target_id = ? 
+                   OR target_id IN (SELECT version_id FROM endpoint_versions WHERE endpoint_id = ?)
+                ORDER BY audit_id DESC LIMIT ?
+                """,
+                (target_id, target_id, limit),
             )
             rows = await cursor.fetchall()
             return [_format_audit(r) for r in rows]

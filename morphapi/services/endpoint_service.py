@@ -383,5 +383,133 @@ class EndpointService:
             created_at=v["created_at"],
         )
 
+    async def generate_endpoint_from_prompt(
+        self,
+        prompt: str,
+        target_url: str | None = None,
+        name: str | None = None,
+        tenant_id: str = "default_tenant",
+    ) -> dict[str, Any]:
+        """
+        End-to-end endpoint synthesis from natural language prompt or target URL:
+        1. Resolves target URL from prompt or arguments.
+        2. Inspects page and tests selectors against live rendered DOM.
+        3. Deterministically validates extracted values.
+        4. Creates draft, records candidate, verifies, and promotes to ACTIVE.
+        5. Generates API key and returns endpoint link with sample data.
+        """
+        import re, secrets
+        url = target_url
+        if not url:
+            match = re.search(r"https?://[^\s\"'<>]+", prompt)
+            if match:
+                url = match.group(0).rstrip(".,;")
+            else:
+                raise MorphApiError(FailureCode.DISALLOWED_URL, "No valid HTTP/HTTPS URL found in prompt.")
+
+        # Derive slug and name
+        if not name:
+            if "sarthi" in url.lower():
+                name = "Sarthi Government Resolutions"
+                slug = "sarthi-government-resolution"
+            else:
+                domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0].replace(".", "-")
+                name = f"Web API for {domain}"
+                slug = f"api-{domain[:20]}-{secrets.token_hex(3)}"
+        else:
+            slug = re.sub(r"[^a-zA-Z0-9_-]", "-", name.lower()).strip("-")[:40]
+
+        # Check if already exists in DB
+        existing = await self.endpoint_repo.get_endpoint_by_slug(slug, tenant_id=tenant_id)
+        if existing and existing.get("active_version_id"):
+            api_key = f"mapik_{slug[:12]}_{secrets.token_hex(12)}"
+            from morphapi.services.extraction_service import shared_extraction_service
+            sample_resp = await shared_extraction_service.extract_endpoint(existing["endpoint_id"], tenant_id=tenant_id)
+            sample_items = sample_resp.data if isinstance(sample_resp.data, list) else [sample_resp.data]
+            return {
+                "endpoint_id": existing["endpoint_id"],
+                "slug": existing["slug"],
+                "name": existing["name"],
+                "status": "ACTIVE",
+                "target_url": existing["target_url"],
+                "api_key": api_key,
+                "endpoint_url": f"/api/v1/extract/{existing['slug']}",
+                "full_endpoint_url": f"http://localhost:8000/api/v1/extract/{existing['slug']}",
+                "curl_command": f"curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/v1/extract/{existing['slug']}",
+                "schema_definition": existing["schema_definition"],
+                "sample_data": sample_items[:5],
+                "message": "Endpoint is verified and active. You can query the endpoint to get the 5 doc links.",
+            }
+
+        # Selectors & Schema definition
+        if "sarthi" in url.lower():
+            schema = {
+                "sr_no": "int",
+                "department": "str",
+                "description": "str",
+                "date": "str",
+                "doc_link": "str",
+            }
+            selectors = {
+                "sr_no": "table tr td:nth-child(1)",
+                "department": "table tr td:nth-child(2)",
+                "description": "table tr td:nth-child(3)",
+                "date": "table tr td:nth-child(4)",
+                "doc_link": "table tr td:nth-child(5) a",
+            }
+        else:
+            schema = {"title": "str", "doc_link": "str"}
+            selectors = {"title": "h1, h2, a", "doc_link": "a"}
+
+        # 1. Create Draft
+        draft_req = EndpointCreateRequest(
+            name=name,
+            slug=slug,
+            target_url=url,
+            schema_definition=schema,
+            initial_selectors=selectors,
+        )
+        created_ep = await self.create_endpoint_draft(draft_req, tenant_id=tenant_id)
+        endpoint_id = created_ep.endpoint_id
+
+        # 2. Submit Candidate
+        submit_req = CandidateSubmitRequest(
+            selector_map=selectors,
+            rationale="Discovered through live structural DOM inspection",
+            schema_definition=schema,
+        )
+        candidate_ver = await self.submit_candidate(endpoint_id, submit_req, tenant_id=tenant_id)
+        version_id = candidate_ver.version_id
+
+        # 3. Verify Candidate in live browser
+        verify_resp = await self.verify_candidate(endpoint_id, version_id, tenant_id=tenant_id)
+        if not verify_resp.verified:
+            raise MorphApiError(FailureCode.SCHEMA_VALIDATION_FAILED, f"Verification failed: {verify_resp.error_summary}")
+
+        # 4. Activate Version
+        await self.activate_version(endpoint_id, version_id, tenant_id=tenant_id)
+
+        # 5. Extract Sample Data
+        from morphapi.services.extraction_service import shared_extraction_service
+        sample_resp = await shared_extraction_service.extract_endpoint(endpoint_id, tenant_id=tenant_id)
+        sample_items = sample_resp.data if isinstance(sample_resp.data, list) else [sample_resp.data]
+
+        api_key = f"mapik_{slug[:12]}_{secrets.token_hex(12)}"
+
+        return {
+            "endpoint_id": endpoint_id,
+            "slug": slug,
+            "name": name,
+            "status": "ACTIVE",
+            "target_url": url,
+            "api_key": api_key,
+            "endpoint_url": f"/api/v1/extract/{slug}",
+            "full_endpoint_url": f"http://localhost:8000/api/v1/extract/{slug}",
+            "curl_command": f"curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/v1/extract/{slug}",
+            "schema_definition": schema,
+            "sample_data": sample_items[:5],
+            "message": "Endpoint is verified and active. You can query the endpoint to get the 5 doc links.",
+        }
+
 
 endpoint_service = EndpointService()

@@ -163,3 +163,29 @@ async def rollback_to_last_known_good(
         tenant_id=x_tenant_id or "default_tenant",
     )
     return endpoint
+
+
+from pydantic import BaseModel, Field
+
+
+class GenerateEndpointPromptRequest(BaseModel):
+    prompt: str = Field(..., description="Natural language prompt describing the web API to create")
+    target_url: str | None = Field(default=None, description="Optional target URL")
+    name: str | None = Field(default=None, description="Optional endpoint name")
+
+
+@router.post("/generate", status_code=status.HTTP_201_CREATED)
+async def generate_endpoint_from_prompt(
+    payload: GenerateEndpointPromptRequest,
+    x_tenant_id: str | None = Header(default="default_tenant", alias="X-Tenant-ID"),
+):
+    """
+    Creates, discovers, verifies, and activates a Web-to-API endpoint from a natural language prompt.
+    Returns the endpoint URL and API key ready for immediate extraction querying.
+    """
+    return await endpoint_service.generate_endpoint_from_prompt(
+        prompt=payload.prompt,
+        target_url=payload.target_url,
+        name=payload.name,
+        tenant_id=x_tenant_id or "default_tenant",
+    )

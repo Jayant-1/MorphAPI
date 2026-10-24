@@ -27,6 +27,8 @@ router = APIRouter(prefix="/api/v1/extract", tags=["Extraction"])
 )
 async def extract_get(
     endpoint_id: str,
+    limit: int | None = None,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     x_tenant_id: str | None = Header(default="default_tenant", alias="X-Tenant-ID"),
     x_correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
 ):
@@ -35,11 +37,14 @@ async def extract_get(
     Zero-token Fast Path executes first; self-healing triggers only on failure.
     """
     req_id = x_correlation_id or get_correlation_id()
-    return await shared_extraction_service.extract_endpoint(
+    resp = await shared_extraction_service.extract_endpoint(
         endpoint_id=endpoint_id,
         tenant_id=x_tenant_id or "default_tenant",
         request_id=req_id,
     )
+    if limit is not None and isinstance(resp.data, list):
+        resp.data = resp.data[:limit]
+    return resp
 
 
 @router.post(
@@ -56,6 +61,8 @@ async def extract_get(
 )
 async def extract_post(
     endpoint_id: str,
+    limit: int | None = None,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     x_tenant_id: str | None = Header(default="default_tenant", alias="X-Tenant-ID"),
     x_correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
 ):
@@ -63,8 +70,11 @@ async def extract_post(
     Executes extraction for an active endpoint via POST.
     """
     req_id = x_correlation_id or get_correlation_id()
-    return await shared_extraction_service.extract_endpoint(
+    resp = await shared_extraction_service.extract_endpoint(
         endpoint_id=endpoint_id,
         tenant_id=x_tenant_id or "default_tenant",
         request_id=req_id,
     )
+    if limit is not None and isinstance(resp.data, list):
+        resp.data = resp.data[:limit]
+    return resp
