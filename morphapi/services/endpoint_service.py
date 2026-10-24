@@ -484,7 +484,8 @@ class EndpointService:
         # 3. Verify Candidate in live browser
         verify_resp = await self.verify_candidate(endpoint_id, version_id, tenant_id=tenant_id)
         if not verify_resp.verified:
-            raise MorphApiError(FailureCode.SCHEMA_VALIDATION_FAILED, f"Verification failed: {verify_resp.error_summary}")
+            issues_str = ", ".join(verify_resp.issues) if verify_resp.issues else "Candidate validation or selector test failed"
+            raise MorphApiError(FailureCode.SCHEMA_VALIDATION_FAILED, f"Verification failed: {issues_str}")
 
         # 4. Activate Version
         await self.activate_version(endpoint_id, version_id, tenant_id=tenant_id)

@@ -3,6 +3,16 @@ MorphAPI FastAPI Gateway Application
 Control plane, REST routes, lifespan, middleware, and stable error translation.
 """
 
+import sys
+import asyncio
+
+# Ensure Windows Proactor event loop is used so Playwright subprocesses work cleanly
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
