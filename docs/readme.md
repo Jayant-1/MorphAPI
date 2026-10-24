@@ -60,24 +60,19 @@ After activation, the customer can call the generated endpoint through REST or a
 
 ## Repository guide
 
-- [`document-index.md`](document-index.md) — file-by-file guide
-- [`architecture.md`](architecture.md) — complete system architecture, component boundaries, data flows, agent workflow, security model, deployment shape, and key decisions.
-- [`requirements.md`](requirements.md) — functional and non-functional requirements and acceptance criteria.
-- [`build-rules.md`](build-rules.md) — implementation guardrails that every contributor must follow.
-- [`decisions-and-open-questions.md`](decisions-and-open-questions.md) — decisions already made and items that must be resolved before production.
-- [`module-ownership.md`](module-ownership.md) — module boundaries and ownership.
-- [`shared-contracts.md`](shared-contracts.md) — common schemas and internal service contracts.
-- [`api-and-mcp-contract.md`](api-and-mcp-contract.md) — REST and MCP interface expectations.
-- [`database-contract.md`](database-contract.md) — business tables, configuration versioning, and persistence rules.
-- [`healing-flow-and-events.md`](healing-flow-and-events.md) — extraction failure, diagnosis, repair, verification, promotion, and audit event flow.
-- [`deep-agents-langgraph-workflow.md`](deep-agents-langgraph-workflow.md) — agent tools, graph states, bounded loops, checkpointing, interrupts, and model preflight.
-- [`nvidia-nim-provider.md`](nvidia-nim-provider.md) — provider adapter, environment configuration, and compatibility checks.
-- [`test-and-acceptance-plan.md`](test-and-acceptance-plan.md) — test matrix and measurable acceptance gates.
-- [`three-person-workflow.md`](three-person-workflow.md) — work split and integration cadence.
-- [`three-person-implementation-prompts.md`](three-person-implementation-prompts.md) — ready-to-use prompts for each contributor.
-- [`integration-runbook.md`](integration-runbook.md) — local setup and end-to-end integration steps.
-- [`agent-handoff-template.md`](agent-handoff-template.md) — structured handoff format.
-- [`integration-acceptance-checklist.md`](integration-acceptance-checklist.md) — final release checklist.
+- [`document-index.md`](document-index.md) — master file-by-file guide and reading maps
+- [`system-overview.md`](system-overview.md) — executive summary, problem statement, and APMC Mandi pricing demo
+- [`tech-stack.md`](tech-stack.md) — complete technology stack matrix and dependencies
+- [`architecture.md`](architecture.md) — complete system architecture, component boundaries, and high-level design
+- [`frontend-architecture.md`](frontend-architecture.md) — Next.js 15 App Router design, UI instrument aesthetic, and AST diff engine
+- [`api-and-mcp-specification.md`](api-and-mcp-specification.md) — REST endpoint contracts and Model Context Protocol (MCP) tool bindings
+- [`database-schema.md`](database-schema.md) — business entity-relationship models, versioning, and persistence contracts
+- [`self-healing-and-agentic-workflow.md`](self-healing-and-agentic-workflow.md) — LangGraph state transitions, Playwright selector verification, and human approval gates
+- [`security-and-isolation.md`](security-and-isolation.md) — SSRF firewall, browser sandboxing, prompt injection defenses, and scoped tools
+- [`setup-and-deployment.md`](setup-and-deployment.md) — local setup instructions, environment variables, and Docker Compose topology
+- [`testing-and-verification.md`](testing-and-verification.md) — multi-tier testing strategy, release gates, and REST/MCP parity tests
+- [`architectural-decisions.md`](architectural-decisions.md) — formal Architectural Decision Records (ADRs 001 - 005)
+- [`requirements.md`](requirements.md) — functional and non-functional requirements and acceptance criteria
 
 ## Suggested implementation sequence
 

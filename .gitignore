@@ -9,3 +9,30 @@ __pycache__/
 .env
 .morphapi_evidence/
 .pytest_cache/
+# Frontend
+Frontend/node_modules/
+Frontend/.next/
+Frontend/out/
+Frontend/.pnpm-store/
+Frontend/*.tsbuildinfo
+Frontend/next-env.d.ts
+
+# Backend
+Backend/.venv/
+Backend/__pycache__/
+Backend/*.pyc
+Backend/*.db
+Backend/data/*.db
+Backend/.pytest_cache/
+
+# Environment & OS
+.env
+.env.local
+.DS_Store
+*.log
+.venv/
+env
+*.env
+*.env.*
+Frontend/.env.local
+generated_images/

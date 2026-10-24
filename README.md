@@ -174,9 +174,20 @@ MorphAPI/
 │           ├── mcp.ts
 │           └── workflow.ts
 └── docs/
+    ├── api-and-mcp-specification.md
+    ├── architectural-decisions.md
     ├── architecture.md
+    ├── database-schema.md
+    ├── document-index.md
+    ├── frontend-architecture.md
     ├── readme.md
-    └── requirements.md
+    ├── requirements.md
+    ├── security-and-isolation.md
+    ├── self-healing-and-agentic-workflow.md
+    ├── setup-and-deployment.md
+    ├── system-overview.md
+    ├── tech-stack.md
+    └── testing-and-verification.md
 ```
 
 ## 8. Prerequisites

@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --page-bg: #10171B;
+  --conversation-bg: #151E23;
+  --surface-composer: #202C32;
+  --surface-hover: #2A3940;
+  --border-subtle: #3A4A50;
+  --text-primary: #EDF1EE;
+  --text-secondary: #ADBAB9;
+  --accent-sage: #C3D1B8;
+  --accent-hover: #D5DFCD;
+  --accent-text: #17201C;
+  --links-focus: #AEC8D0;
+  --success: #A7C4A2;
+  --warning: #DDC38A;
+  --error: #E3A29E;
+
+  --background: #10171B;
+  --foreground: #EDF1EE;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Storm-Themed Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #10171B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3A4A50;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4A5D66;
+}
+
+/* Code & Data Selection: Pale Sage with Dark Text */
+::selection {
+  background-color: #C3D1B8;
+  color: #17201C;
+}
