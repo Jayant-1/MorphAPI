@@ -540,6 +540,13 @@ class EndpointService:
         rationale = agent_synthesis.get("rationale") or "Deep Agent candidate proposal"
         evidence_refs = [agent_synthesis["evidence_ref"]] if agent_synthesis.get("evidence_ref") else []
 
+        if not agent_synthesis.get("verified", True):
+            logger.warning("[Backend Gate] Deep Agent ReAct loop could not verify candidate selectors live.")
+            raise MorphApiError(
+                FailureCode.SCHEMA_VALIDATION_FAILED,
+                f"Agent ReAct loop was unable to match target fields live against '{url}'. The page may require user interaction or valid query parameters.",
+            )
+
         logger.info("[Backend Gate] ========================================================")
         logger.info("[Backend Gate] [RECEIVED] Received Deep Agent proposal for endpoint '%s'", slug)
         logger.info("[Backend Gate] [SCHEMA] Target schema: %s", schema)
@@ -547,8 +554,9 @@ class EndpointService:
         logger.info("[Backend Gate] [VERIFYING] Running deterministic browser verification gate...")
 
         # 1. Create Draft or reuse existing draft
-        if existing:
-            endpoint_id = existing["endpoint_id"]
+        existing_check = await self.endpoint_repo.get_endpoint_by_slug(slug)
+        if existing_check and existing_check["tenant_id"] == tenant_id:
+            endpoint_id = existing_check["endpoint_id"]
             await self.endpoint_repo.update_endpoint_draft(
                 endpoint_id=endpoint_id,
                 target_url=url,
@@ -556,6 +564,8 @@ class EndpointService:
                 name=discovered_name,
             )
         else:
+            if existing_check and existing_check["tenant_id"] != tenant_id:
+                slug = f"{slug}-{tenant_id[:6]}"
             draft_req = EndpointCreateRequest(
                 name=discovered_name,
                 slug=slug,

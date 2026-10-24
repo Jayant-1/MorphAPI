@@ -109,7 +109,12 @@ class PlaywrightManager:
         """
         self.url_policy.enforce_url_policy(url)
         try:
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=self.navigation_timeout_ms)
+            try:
+                # Attempt networkidle so modern client-side SPAs (React, Next.js, Vue) finish dynamic data hydration
+                response = await page.goto(url, wait_until="networkidle", timeout=min(self.navigation_timeout_ms, 10000))
+            except PlaywrightTimeoutError:
+                # Fallback to domcontentloaded for streaming/long-polling endpoints
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=self.navigation_timeout_ms)
             if response is None:
                 raise BrowserExecutionError(
                     FailureCode.BROWSER_NAVIGATION_ERROR,

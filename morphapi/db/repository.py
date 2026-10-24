@@ -119,6 +119,15 @@ class EndpointRepository:
 
         conn = await get_db_connection(self.db_path)
         try:
+            # Ensure tenant exists to satisfy foreign key constraint
+            await conn.execute(
+                """
+                INSERT OR IGNORE INTO tenants (tenant_id, name, policy_settings, created_at)
+                VALUES (?, ?, '{}', ?)
+                """,
+                (tenant_id, f"User {tenant_id}", now),
+            )
+
             # Create endpoint draft
             await conn.execute(
                 """

@@ -237,9 +237,17 @@ class DeepAgentsHarness:
         # Resolve any template placeholders for live inspection/testing in Chromium
         inspection_url = target_url
         if "{" in target_url and "}" in target_url:
-            year_match = re.search(r"\b(202[0-9]|W2[0-9]|S2[0-9])\b", prompt)
-            sample_val = year_match.group(0) if year_match else "2025"
-            inspection_url = re.sub(r"\{[a-zA-Z0-9_]+\}", sample_val, target_url)
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            parsed = urlparse(target_url)
+            if "{" in parsed.query:
+                # For query parameter templates (e.g. ?batch={batch}), strip template filters to load base listing
+                qs = parse_qs(parsed.query)
+                clean_qs = {k: [v for v in vals if "{" not in v] for k, vals in qs.items()}
+                clean_qs = {k: v for k, v in clean_qs.items() if v}
+                new_q = urlencode(clean_qs, doseq=True)
+                inspection_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_q, parsed.fragment))
+            else:
+                inspection_url = re.sub(r"\{[a-zA-Z0-9_]+\}", "2025", target_url)
             logger.info("[Deep Agent ReAct] Template target URL '%s' resolved to sample inspection URL '%s'", target_url, inspection_url)
 
         logger.info("[Deep Agent ReAct] [STAGE 1: INSPECTION] Invoking tool: inspect_website(url='%s')", inspection_url)
@@ -377,7 +385,7 @@ class DeepAgentsHarness:
 
                     rationale = f"Discovered dynamic tabular layout with {num_cols} structural columns"
                 else:
-                    cards = soup_page.select(".card, article, [class*='card'], [class*='item'], li")
+                    cards = soup_page.find_all("article") or soup_page.find_all("li") or soup_page.select("[role='article'], section")
                     if cards:
                         sample_card = cards[0]
                         schema_def = {}
@@ -437,16 +445,23 @@ class DeepAgentsHarness:
                 logger.warning("[Deep Agent ReAct] [TURN %d] [REFLECTION] Validation failed for fields: %s", turn, failing_fields)
 
                 # Extract context snippet of the first table row or card to help the model self-correct
+                # Extract context snippet of the repeating layout generically using HTML5 semantic elements
                 sample_snippet = ""
-                sample_tr = soup_page.find("tr")
-                if sample_tr and sample_tr.parent:
-                    # Get the second row if header is first
-                    all_trs = soup_page.find_all("tr")
-                    row_target = all_trs[1] if len(all_trs) > 1 else all_trs[0]
-                    sample_snippet = str(row_target)[:800]
-                elif soup_page.find(".card, article, [class*='item']"):
-                    c = soup_page.find(".card, article, [class*='item']")
-                    sample_snippet = str(c)[:800]
+                content_container = soup_page.find(["main", "article"]) or soup_page.find("body") or soup_page
+                first_tr = content_container.find("tr")
+                first_article = content_container.find("article")
+                first_li = content_container.find("li")
+
+                if first_tr:
+                    trs = first_tr.parent.find_all("tr")
+                    row = trs[1] if len(trs) > 1 else trs[0]
+                    sample_snippet = str(row)[:1000]
+                elif first_article:
+                    sample_snippet = str(first_article)[:1000]
+                elif first_li:
+                    sample_snippet = str(first_li)[:1000]
+                else:
+                    sample_snippet = str(content_container)[:1000]
 
                 feedback_msg = (
                     f"Observation from live browser testing:\n"
