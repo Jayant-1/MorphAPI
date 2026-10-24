@@ -49,16 +49,21 @@ class SharedExtractionService:
         tenant_id: str = "default_tenant",
         request_id: str | None = None,
         auto_heal: bool = True,
+        params: dict[str, Any] | None = None,
     ) -> ExtractionResponse:
         """
         High-level extraction entrypoint used by REST /api/v1/extract/{endpoint_id} and MCP tools.
         Loads active verified configuration and executes extraction.
+        Applies runtime URL query parameters or template substitutions (e.g. {year}, {batch}).
         """
         req_id = request_id or get_correlation_id()
         endpoint = await self.endpoint_repo.get_endpoint(endpoint_id, tenant_id=tenant_id)
         if not endpoint:
-            # Fallback check slug
             endpoint = await self.endpoint_repo.get_endpoint_by_slug(endpoint_id, tenant_id=tenant_id)
+        if not endpoint:
+            endpoint = await self.endpoint_repo.get_endpoint(endpoint_id)
+        if not endpoint:
+            endpoint = await self.endpoint_repo.get_endpoint_by_slug(endpoint_id)
         if not endpoint:
             raise MorphApiError(
                 FailureCode.ENDPOINT_NOT_FOUND,
@@ -82,9 +87,36 @@ class SharedExtractionService:
                 details={"endpoint_id": endpoint_id},
             )
 
+        # Compute dynamic effective URL from parameters
+        effective_url = endpoint["target_url"]
+        if params:
+            # 1. Substitute path and template placeholders {param}
+            for k, v in params.items():
+                placeholder = f"{{{k}}}"
+                if placeholder in effective_url:
+                    effective_url = effective_url.replace(placeholder, str(v))
+
+            # 2. Append or update query string parameters not consumed by placeholders
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            parsed = urlparse(effective_url)
+            qs = parse_qs(parsed.query)
+            for k, v in params.items():
+                if f"{{{k}}}" not in endpoint["target_url"]:
+                    qs[k] = [str(v)]
+            new_query = urlencode(qs, doseq=True)
+            effective_url = urlunparse((
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                new_query,
+                parsed.fragment,
+            ))
+            logger.info("[%s] Dynamic target URL parameterized with %s -> %s", endpoint_id, params, effective_url)
+
         return await self.extract(
             endpoint_id=endpoint["endpoint_id"],
-            target_url=endpoint["target_url"],
+            target_url=effective_url,
             schema_definition=active_ver["schema_definition"],
             selectors=active_ver["selector_map"],
             auto_heal=auto_heal,

@@ -184,6 +184,11 @@ class GenerateEndpointPromptRequest(BaseModel):
         description="Optional display name for the endpoint",
         examples=["Sarthi Government Resolutions"],
     )
+    user_id: str | None = Field(
+        default=None,
+        description="User identifier to scope the API path, e.g. /v1/api/{user_id}/{api_name}",
+        examples=["alice", "team-growth", "default"],
+    )
 
 
 @router.post("/generate", status_code=status.HTTP_201_CREATED)
@@ -196,11 +201,12 @@ async def generate_endpoint_from_prompt(
     Creates, discovers, verifies, and activates a Web-to-API endpoint from a natural language prompt.
     Returns the endpoint URL and API key ready for immediate extraction querying.
     """
+    effective_user = payload.user_id or (x_tenant_id if x_tenant_id != "default_tenant" else "default")
     result = await endpoint_service.generate_endpoint_from_prompt(
         prompt=payload.prompt,
         target_url=payload.target_url,
         name=payload.name,
-        tenant_id=x_tenant_id or "default_tenant",
+        tenant_id=effective_user,
     )
     if isinstance(result, dict) and result.get("status") == "BLOCKED":
         response.status_code = status.HTTP_403_FORBIDDEN

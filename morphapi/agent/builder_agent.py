@@ -234,8 +234,16 @@ class DeepAgentsHarness:
         # -------------------------------------------------------------
         # Action 1: Scoped Browser Inspection (Tool: inspect_website)
         # -------------------------------------------------------------
-        logger.info("[Deep Agent ReAct] [STAGE 1: INSPECTION] Invoking tool: inspect_website(url='%s')", target_url)
-        inspect_res = await self.execute_tool("inspect_website", {"url": target_url})
+        # Resolve any template placeholders for live inspection/testing in Chromium
+        inspection_url = target_url
+        if "{" in target_url and "}" in target_url:
+            year_match = re.search(r"\b(202[0-9]|W2[0-9]|S2[0-9])\b", prompt)
+            sample_val = year_match.group(0) if year_match else "2025"
+            inspection_url = re.sub(r"\{[a-zA-Z0-9_]+\}", sample_val, target_url)
+            logger.info("[Deep Agent ReAct] Template target URL '%s' resolved to sample inspection URL '%s'", target_url, inspection_url)
+
+        logger.info("[Deep Agent ReAct] [STAGE 1: INSPECTION] Invoking tool: inspect_website(url='%s')", inspection_url)
+        inspect_res = await self.execute_tool("inspect_website", {"url": inspection_url})
         if inspect_res.get("error"):
             logger.warning("[Deep Agent ReAct] [WARN] inspect_website reported error: %s", inspect_res["error"])
 
@@ -245,6 +253,8 @@ class DeepAgentsHarness:
         logger.info("[Deep Agent ReAct] [STAGE 1 SUCCESS] Rendered Page Title: '%s' | Extracted DOM: %d characters", page_title, len(pruned_dom))
 
         discovered_name = name
+        discovered_inputs: dict[str, Any] = {}
+        discovered_url = target_url
         schema_def: dict[str, str] = {}
         candidate_selectors: dict[str, str] = {}
         rationale = "Candidate selectors discovered and verified through ReAct browser testing"
@@ -263,14 +273,17 @@ class DeepAgentsHarness:
         audit_history: list[dict[str, Any]] = []
 
         system_msg = (
-            "You are an expert browser automation and web extraction engineer for MorphAPI. "
-            "Analyze the user request and rendered DOM to propose CSS selectors and typed schema. "
+            "You are an expert API Architect and browser automation engineer for MorphAPI. "
+            "Analyze the user request and rendered DOM to dynamically design the full API contract. "
+            "Decide the optimal API inputs, outputs, URL query/path parameter mapping, and CSS selectors. "
             "Identify repeating rows, cards, or items on the page. "
             "For tables, account for row headers (<th scope='row'>) as well as data cells (<td>). "
             "Return ONLY valid JSON with keys:\n"
-            "  \"name\": string display name for the API,\n"
-            "  \"schema_definition\": dictionary of field name to type (\"str\", \"int\", \"float\", \"bool\"),\n"
-            "  \"selectors\": dictionary of field name to valid CSS selector matching each record's field,\n"
+            "  \"name\": string display name or slug for the API,\n"
+            "  \"inputs\": dictionary of input parameters that users can supply to customize queries (e.g. {\"batch\": {\"type\": \"str\", \"description\": \"Batch filter\", \"default\": \"W25\"}}),\n"
+            "  \"target_url_template\": target URL with placeholders like {param_name} if inputs customize the URL, or the base URL,\n"
+            "  \"schema_definition\": dictionary of output field name to type (\"str\", \"int\", \"float\", \"bool\"),\n"
+            "  \"selectors\": dictionary of output field name to valid CSS selector matching each record's field,\n"
             "  \"rationale\": string explanation of why these selectors match the target items."
         )
 
@@ -306,6 +319,8 @@ class DeepAgentsHarness:
                 parsed = self.provider._extract_json(raw_text)
                 if isinstance(parsed, dict) and "selectors" in parsed and "schema_definition" in parsed:
                     discovered_name = discovered_name or parsed.get("name")
+                    discovered_inputs = parsed.get("inputs", {})
+                    discovered_url = parsed.get("target_url_template") or target_url
                     schema_def = parsed["schema_definition"]
                     candidate_selectors = parsed["selectors"]
                     rationale = parsed.get("rationale", rationale)
@@ -394,7 +409,7 @@ class DeepAgentsHarness:
 
             # Stage 3: Action: Live Selector Testing in Chromium (Tool: test_selectors)
             logger.info("[Deep Agent ReAct] [TURN %d] [ACTION: TEST] Testing candidate selectors live in Chromium...", turn)
-            test_res = await self.execute_tool("test_selectors", {"page_ref": target_url, "candidates": candidate_selectors})
+            test_res = await self.execute_tool("test_selectors", {"page_ref": inspection_url, "candidates": candidate_selectors})
             evidences = test_res.get("field_evidences", [])
             match_summary = {fe["field_name"]: fe.get("matched_count", 0) for fe in evidences if "field_name" in fe}
             logger.info("[Deep Agent ReAct] [TURN %d] [OBSERVATION] Live DOM match counts: %s", turn, match_summary)
@@ -458,11 +473,12 @@ class DeepAgentsHarness:
 
         return {
             "name": discovered_name,
-            "target_url": target_url,
+            "target_url": discovered_url or target_url,
             "schema_definition": schema_def,
             "selectors": candidate_selectors,
             "rationale": rationale,
             "evidence_ref": evidence_ref,
             "verified": is_verified,
             "react_turns": turn,
+            "inputs": discovered_inputs,
         }

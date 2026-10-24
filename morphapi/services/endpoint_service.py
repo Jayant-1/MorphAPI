@@ -221,10 +221,15 @@ class EndpointService:
                 match_counts[k] = 1
         else:
             # Live browser extraction test
-            logger.info(f"Running deterministic browser verification for version {version_id} on {target_url}")
+            effective_test_url = target_url
+            if "{" in target_url and "}" in target_url:
+                import re
+                effective_test_url = re.sub(r"\{[a-zA-Z0-9_]+\}", "W25", target_url)
+
+            logger.info(f"Running deterministic browser verification for version {version_id} on {effective_test_url}")
             extract_res: ExtractionResult = await self.extractor.extract(
                 endpoint_id=endpoint_id,
-                target_url=target_url,
+                target_url=effective_test_url,
                 schema_definition=schema_def,
                 selector_map=selector_map,
             )
@@ -447,19 +452,32 @@ class EndpointService:
             from morphapi.services.extraction_service import shared_extraction_service
             sample_resp = await shared_extraction_service.extract_endpoint(existing["endpoint_id"], tenant_id=tenant_id)
             sample_items = sample_resp.data if isinstance(sample_resp.data, list) else [sample_resp.data]
+            user_scope = tenant_id if tenant_id and tenant_id not in ("default_tenant", "string") else "default"
+            endpoint_path = f"/v1/api/{user_scope}/{existing['slug']}"
+            full_endpoint_url = f"http://localhost:8000{endpoint_path}"
+            curl_command = f"curl -H 'X-API-Key: {api_key}' '{full_endpoint_url}'"
             return {
                 "endpoint_id": existing["endpoint_id"],
+                "user_id": user_scope,
+                "api_name": existing["slug"],
                 "slug": existing["slug"],
                 "name": existing["name"],
                 "status": "ACTIVE",
                 "target_url": existing["target_url"],
                 "api_key": api_key,
-                "endpoint_url": f"/api/v1/extract/{existing['slug']}",
-                "full_endpoint_url": f"http://localhost:8000/api/v1/extract/{existing['slug']}",
-                "curl_command": f"curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/v1/extract/{existing['slug']}",
+                "endpoint_url": endpoint_path,
+                "full_endpoint_url": full_endpoint_url,
+                "curl_command": curl_command,
+                "api_specification": {
+                    "method": "GET",
+                    "path": endpoint_path,
+                    "inputs": existing.get("extraction_hints", {}).get("inputs", {}),
+                    "outputs": existing["schema_definition"],
+                    "parameterized_url": existing["target_url"],
+                },
                 "schema_definition": existing["schema_definition"],
                 "sample_data": sample_items[:5],
-                "message": f"Endpoint '{existing['slug']}' is verified and active. You can query the endpoint at /api/v1/extract/{existing['slug']} to extract live data.",
+                "message": f"Endpoint '{endpoint_path}' is verified and active. You can query it dynamically.",
             }
 
         # Stage 0: MorphAPI Responsible Access Guard (Source Policy Assessment)
@@ -582,24 +600,42 @@ class EndpointService:
             version_repo=self.version_repo,
             auditor=self.auditor,
         )
-        sample_resp = await extraction_svc.extract_endpoint(endpoint_id, tenant_id=tenant_id)
+        sample_params = {}
+        if "{" in url and "}" in url:
+            sample_params = {"batch": "W25", "year": "2025"}
+        sample_resp = await extraction_svc.extract_endpoint(endpoint_id, tenant_id=tenant_id, params=sample_params)
         sample_items = sample_resp.data if isinstance(sample_resp.data, list) else [sample_resp.data]
 
         api_key = f"mapik_{slug[:12]}_{secrets.token_hex(12)}"
 
+        inputs = agent_synthesis.get("inputs", {})
+        user_scope = tenant_id if tenant_id and tenant_id not in ("default_tenant", "string") else "default"
+        endpoint_path = f"/v1/api/{user_scope}/{slug}"
+        full_endpoint_url = f"http://localhost:8000{endpoint_path}"
+        curl_command = f"curl -H 'X-API-Key: {api_key}' '{full_endpoint_url}'"
+
         return {
             "endpoint_id": endpoint_id,
+            "user_id": user_scope,
+            "api_name": slug,
             "slug": slug,
             "name": name,
             "status": "ACTIVE",
             "target_url": url,
             "api_key": api_key,
-            "endpoint_url": f"/api/v1/extract/{slug}",
-            "full_endpoint_url": f"http://localhost:8000/api/v1/extract/{slug}",
-            "curl_command": f"curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/v1/extract/{slug}",
+            "endpoint_url": endpoint_path,
+            "full_endpoint_url": full_endpoint_url,
+            "curl_command": curl_command,
+            "api_specification": {
+                "method": "GET",
+                "path": endpoint_path,
+                "inputs": inputs,
+                "outputs": schema,
+                "parameterized_url": url,
+            },
             "schema_definition": schema,
             "sample_data": sample_items[:5],
-            "message": f"Endpoint '{slug}' is verified and active. You can query the endpoint at /api/v1/extract/{slug} to extract live data.",
+            "message": f"Endpoint '{endpoint_path}' is verified and active. You can query it dynamically.",
         }
 
 
