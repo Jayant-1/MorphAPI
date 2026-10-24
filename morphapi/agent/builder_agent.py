@@ -429,15 +429,17 @@ class DeepAgentsHarness:
             })
 
             # Stage 4: Reflection & Self-Correction Evaluation
-            failing_fields = [f for f, count in match_summary.items() if count == 0]
+            failing_fields = [f for f in candidate_selectors.keys() if match_summary.get(f, 0) == 0]
             error_details = []
             for ev in evidences:
                 if ev.get("error"):
                     error_details.append(f"Field '{ev['field_name']}': {ev['error']}")
+                    if ev.get("field_name") not in failing_fields:
+                        failing_fields.append(ev.get("field_name"))
                 elif ev.get("matched_count", 0) == 0:
                     error_details.append(f"Field '{ev['field_name']}' matched 0 elements with selector '{ev.get('selector')}'")
 
-            if not failing_fields and candidate_selectors:
+            if not failing_fields and candidate_selectors and len(match_summary) >= len(candidate_selectors):
                 logger.info("[Deep Agent ReAct] [TURN %d] [VERIFIED] All fields matched real DOM elements live!", turn)
                 is_verified = True
                 break

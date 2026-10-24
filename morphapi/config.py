@@ -68,7 +68,7 @@ class MorphApiSettings(BaseModel):
         default_factory=lambda: float(os.getenv("WORKFLOW_DEADLINE_SECONDS", "120.0"))
     )
     per_tool_timeout_seconds: float = Field(
-        default_factory=lambda: float(os.getenv("PER_TOOL_TIMEOUT_SECONDS", "15.0"))
+        default_factory=lambda: float(os.getenv("PER_TOOL_TIMEOUT_SECONDS", "30.0"))
     )
 
     # Checkpoint and Evidence Paths
