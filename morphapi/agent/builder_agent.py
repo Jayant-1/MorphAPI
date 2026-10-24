@@ -249,19 +249,26 @@ class DeepAgentsHarness:
         soup_check = BeautifulSoup(pruned_dom, "html.parser")
         has_table = bool(soup_check.find("table"))
         user_wants_data = any(w in prompt.lower() for w in ["price", "rate", "cost", "mandi", "wholesale", "resolution", "report", "table"])
-        if not has_table and user_wants_data:
+        is_directory_url = any(p in target_url.lower() for p in ["/dates", "/archive", "/list", "/directory", "/categories", "/index"])
+        
+        if not has_table and (user_wants_data or is_directory_url):
             from urllib.parse import urljoin
             drilldown_candidates = []
-            for a in soup_check.find_all("a", href=True):
-                href = a["href"].strip()
-                if not href or href.startswith("#") or href.startswith("javascript:"):
-                    continue
-                href_lower = href.lower()
-                text_lower = a.get_text(strip=True).lower()
-                if any(w in href_lower or w in text_lower for w in ["view", "detail", "report", "download", "daily"]):
-                    full_href = urljoin(target_url, href)
-                    if full_href.startswith("http") and not full_href.endswith("#") and full_href.split("#")[0] != target_url.split("#")[0]:
-                        drilldown_candidates.append(full_href)
+            content_containers = soup_check.select(".card, article, main, #content, .content, [class*='container']") or [soup_check]
+            for container in content_containers:
+                for a in container.find_all("a", href=True):
+                    if a.find_parent(["nav", "header"]) or any("menu" in c.lower() or "nav" in c.lower() for c in (a.get("class") or [])):
+                        continue
+                    href = a["href"].strip()
+                    if not href or href.startswith("#") or href.startswith("javascript:"):
+                        continue
+                    href_lower = href.lower()
+                    text_lower = a.get_text(strip=True).lower()
+                    if any(w in href_lower or w in text_lower for w in ["view", "detail", "report", "download", "daily", "bajarbhav"]):
+                        full_href = urljoin(target_url, href)
+                        if full_href.startswith("http") and not full_href.endswith("#") and full_href.split("#")[0] != target_url.split("#")[0]:
+                            if full_href not in drilldown_candidates:
+                                drilldown_candidates.append(full_href)
             
             if drilldown_candidates:
                 drill_url = drilldown_candidates[0]

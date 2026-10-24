@@ -117,7 +117,7 @@ class AgentToolRegistry:
                 "evidence_ref": result["evidence_ref"],
                 "page_title": result["page_title"],
                 "url": result["current_url"],
-                "pruned_dom_sample": result["pruned_dom"][:10000],
+                "pruned_dom_sample": result["pruned_dom"][:45000],
                 "screenshot_captured": result["screenshot_b64"] is not None,
             }
 
