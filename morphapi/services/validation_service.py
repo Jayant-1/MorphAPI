@@ -156,19 +156,20 @@ class ValidationService:
                 else:
                     normalized_list.append(norm_record)
 
-            if all_errors:
+            if normalized_list:
+                return ValidationResult(
+                    is_valid=True,
+                    normalized_data=normalized_list,
+                    errors=[],
+                    field_evidences=evidences,
+                )
+            else:
                 return ValidationResult(
                     is_valid=False,
                     normalized_data=None,
-                    errors=all_errors,
+                    errors=all_errors or ["No valid rows passed schema validation"],
                     field_evidences=evidences,
                 )
-            return ValidationResult(
-                is_valid=True,
-                normalized_data=normalized_list,
-                errors=[],
-                field_evidences=evidences,
-            )
 
         elif isinstance(extracted_data, dict):
             norm_record, errs = self.validate_record(extracted_data, schema_definition)
