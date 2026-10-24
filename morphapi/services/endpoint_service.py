@@ -28,6 +28,7 @@ from morphapi.schemas.endpoint import (
 from morphapi.schemas.errors import FailureCode, MorphApiError
 from morphapi.services.audit_service import AuditService, audit_service
 from morphapi.services.validation_service import ValidationService
+from morphapi.agent.builder_agent import DeepAgentsHarness
 
 
 class EndpointService:
@@ -39,6 +40,7 @@ class EndpointService:
         browser_extractor: BrowserExtractor | None = None,
         selector_tester: SelectorTester | None = None,
         auditor: AuditService | None = None,
+        builder_agent: DeepAgentsHarness | None = None,
     ):
         self.endpoint_repo = endpoint_repo or EndpointRepository()
         self.version_repo = version_repo or VersionRepository()
@@ -46,6 +48,7 @@ class EndpointService:
         self.extractor = browser_extractor or BrowserExtractor()
         self.tester = selector_tester or SelectorTester()
         self.auditor = auditor or audit_service
+        self.builder_agent = builder_agent or DeepAgentsHarness()
 
     async def create_endpoint_draft(
         self,
@@ -446,32 +449,30 @@ class EndpointService:
                 "message": "Endpoint is verified and active. You can query the endpoint to get the 5 doc links.",
             }
 
-        # Selectors & Schema definition
-        if "sarthi" in url.lower():
-            schema = {
-                "sr_no": "int",
-                "department": "str",
-                "description": "str",
-                "date": "str",
-                "doc_link": "str",
-            }
-            selectors = {
-                "sr_no": "table tr td:nth-child(1)",
-                "department": "table tr td:nth-child(2)",
-                "description": "table tr td:nth-child(3)",
-                "date": "table tr td:nth-child(4)",
-                "doc_link": "table tr td:nth-child(5) a",
-            }
-        else:
-            schema = {"title": "str", "doc_link": "str"}
-            selectors = {"title": "h1, h2, a", "doc_link": "a"}
+        # Invoke Deep Agent Harness to inspect the website, reason over prompt, and discover candidate selectors
+        agent_synthesis = await self.builder_agent.synthesize_from_prompt(
+            prompt=prompt,
+            target_url=url,
+            name=name,
+        )
+        schema = agent_synthesis["schema_definition"]
+        selectors = agent_synthesis["selectors"]
+        discovered_name = agent_synthesis.get("name") or name or f"Web API for {slug}"
+        rationale = agent_synthesis.get("rationale") or "Deep Agent candidate proposal"
+        evidence_refs = [agent_synthesis["evidence_ref"]] if agent_synthesis.get("evidence_ref") else []
+
+        logger.info("[Backend Gate] ========================================================")
+        logger.info("[Backend Gate] [RECEIVED] Received Deep Agent proposal for endpoint '%s'", slug)
+        logger.info("[Backend Gate] [SCHEMA] Target schema: %s", schema)
+        logger.info("[Backend Gate] [SELECTORS] Proposed selectors: %s", selectors)
+        logger.info("[Backend Gate] [VERIFYING] Running deterministic browser verification gate...")
 
         # 1. Create Draft or reuse existing draft
         if existing:
             endpoint_id = existing["endpoint_id"]
         else:
             draft_req = EndpointCreateRequest(
-                name=name,
+                name=discovered_name,
                 slug=slug,
                 target_url=url,
                 schema_definition=schema,
@@ -483,8 +484,9 @@ class EndpointService:
         # 2. Submit Candidate
         submit_req = CandidateSubmitRequest(
             selector_map=selectors,
-            rationale="Discovered through live structural DOM inspection",
+            rationale=rationale,
             schema_definition=schema,
+            evidence_refs=evidence_refs,
         )
         candidate_ver = await self.submit_candidate(endpoint_id, submit_req, tenant_id=tenant_id)
         version_id = candidate_ver.version_id
@@ -493,14 +495,27 @@ class EndpointService:
         verify_resp = await self.verify_candidate(endpoint_id, version_id, tenant_id=tenant_id)
         if not verify_resp.verified:
             issues_str = ", ".join(verify_resp.issues) if verify_resp.issues else "Candidate validation or selector test failed"
+            logger.error("[Backend Gate] [REJECTED] Candidate verification failed: %s", issues_str)
             raise MorphApiError(FailureCode.SCHEMA_VALIDATION_FAILED, f"Verification failed: {issues_str}")
+
+        logger.info("[Backend Gate] [VERIFIED] Candidate configuration verified successfully against real browser DOM!")
+        logger.info("[Backend Gate] [PROMOTING] Atomically promoting version %s to ACTIVE", version_id)
 
         # 4. Activate Version
         await self.activate_version(endpoint_id, version_id, tenant_id=tenant_id)
+        logger.info("[Backend Gate] [ACTIVE] Endpoint '%s' is now ACTIVE. Fast Path ready for client queries.", slug)
+        logger.info("[Backend Gate] ========================================================")
 
         # 5. Extract Sample Data
-        from morphapi.services.extraction_service import shared_extraction_service
-        sample_resp = await shared_extraction_service.extract_endpoint(endpoint_id, tenant_id=tenant_id)
+        from morphapi.services.extraction_service import SharedExtractionService
+        extraction_svc = SharedExtractionService(
+            extractor=self.extractor,
+            validator=self.validator,
+            endpoint_repo=self.endpoint_repo,
+            version_repo=self.version_repo,
+            auditor=self.auditor,
+        )
+        sample_resp = await extraction_svc.extract_endpoint(endpoint_id, tenant_id=tenant_id)
         sample_items = sample_resp.data if isinstance(sample_resp.data, list) else [sample_resp.data]
 
         api_key = f"mapik_{slug[:12]}_{secrets.token_hex(12)}"

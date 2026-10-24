@@ -14,6 +14,7 @@ from morphapi.app import app
 from morphapi.config import settings
 from morphapi.db.migrations import run_migrations
 from morphapi.services.endpoint_service import endpoint_service
+from morphapi.services.extraction_service import shared_extraction_service
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -23,6 +24,9 @@ async def init_test_db(tmp_path, monkeypatch):
     endpoint_service.endpoint_repo.db_path = test_db
     endpoint_service.version_repo.db_path = test_db
     endpoint_service.auditor.repo.db_path = test_db
+    shared_extraction_service.endpoint_repo.db_path = test_db
+    shared_extraction_service.version_repo.db_path = test_db
+    shared_extraction_service.auditor.repo.db_path = test_db
     await run_migrations(db_path=test_db)
 
 
