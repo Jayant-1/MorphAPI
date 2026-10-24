@@ -461,16 +461,19 @@ class EndpointService:
             schema = {"title": "str", "doc_link": "str"}
             selectors = {"title": "h1, h2, a", "doc_link": "a"}
 
-        # 1. Create Draft
-        draft_req = EndpointCreateRequest(
-            name=name,
-            slug=slug,
-            target_url=url,
-            schema_definition=schema,
-            initial_selectors=selectors,
-        )
-        created_ep = await self.create_endpoint_draft(draft_req, tenant_id=tenant_id)
-        endpoint_id = created_ep.endpoint_id
+        # 1. Create Draft or reuse existing draft
+        if existing:
+            endpoint_id = existing["endpoint_id"]
+        else:
+            draft_req = EndpointCreateRequest(
+                name=name,
+                slug=slug,
+                target_url=url,
+                schema_definition=schema,
+                initial_selectors=selectors,
+            )
+            created_ep = await self.create_endpoint_draft(draft_req, tenant_id=tenant_id)
+            endpoint_id = created_ep.endpoint_id
 
         # 2. Submit Candidate
         submit_req = CandidateSubmitRequest(
