@@ -399,13 +399,18 @@ class EndpointService:
         5. Generates API key and returns endpoint link with sample data.
         """
         import re, secrets
+
+        # Sanitize Swagger UI dummy values
+        if name == "string":
+            name = None
+
         url = target_url
-        if not url:
+        if not url or url.strip().lower() in ("string", "none", "null") or not url.startswith("http"):
             match = re.search(r"https?://[^\s\"'<>]+", prompt)
             if match:
                 url = match.group(0).rstrip(".,;")
             else:
-                raise MorphApiError(FailureCode.DISALLOWED_URL, "No valid HTTP/HTTPS URL found in prompt.")
+                raise MorphApiError(FailureCode.DISALLOWED_URL, "No valid HTTP/HTTPS URL found in prompt or target_url.")
 
         # Derive slug and name
         if not name:

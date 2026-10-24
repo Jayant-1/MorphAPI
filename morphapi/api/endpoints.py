@@ -169,9 +169,21 @@ from pydantic import BaseModel, Field
 
 
 class GenerateEndpointPromptRequest(BaseModel):
-    prompt: str = Field(..., description="Natural language prompt describing the web API to create")
-    target_url: str | None = Field(default=None, description="Optional target URL")
-    name: str | None = Field(default=None, description="Optional endpoint name")
+    prompt: str = Field(
+        ...,
+        description="Natural language prompt describing the web API to create",
+        examples=["Extract top 5 government resolution document links from https://sarthi.maharashtra.gov.in/en/government-resolution"],
+    )
+    target_url: str | None = Field(
+        default=None,
+        description="Optional target URL (if omitted, extracted from prompt)",
+        examples=["https://sarthi.maharashtra.gov.in/en/government-resolution"],
+    )
+    name: str | None = Field(
+        default=None,
+        description="Optional display name for the endpoint",
+        examples=["Sarthi Government Resolutions"],
+    )
 
 
 @router.post("/generate", status_code=status.HTTP_201_CREATED)
