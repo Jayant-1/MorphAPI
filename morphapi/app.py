@@ -49,6 +49,11 @@ async def lifespan(app: FastAPI):
     logger.info("MorphAPI Gateway initialized and ready.")
     yield
     logger.info("Shutting down MorphAPI Gateway...")
+    try:
+        from morphapi.services.endpoint_service import endpoint_service
+        await endpoint_service.close()
+    except Exception:
+        pass
 
 
 def create_app() -> FastAPI:

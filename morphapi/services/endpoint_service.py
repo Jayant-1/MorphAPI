@@ -60,6 +60,14 @@ class EndpointService:
             self._builder_agent = DeepAgentsHarness()
         return self._builder_agent
 
+    async def close(self) -> None:
+        """Gracefully release browser and driver resources."""
+        if hasattr(self, "extractor") and hasattr(self.extractor, "manager"):
+            try:
+                await self.extractor.manager.close()
+            except Exception:
+                pass
+
     async def create_endpoint_draft(
         self,
         request: EndpointCreateRequest,
