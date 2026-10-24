@@ -88,7 +88,9 @@ class SharedExtractionService:
             )
 
         # Compute dynamic effective URL from parameters
-        effective_url = endpoint["target_url"]
+        from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
+        from morphapi.browser.url_policy import resolve_test_url
+        effective_url = unquote(endpoint["target_url"])
         if params:
             # 1. Substitute path and template placeholders {param}
             for k, v in params.items():
@@ -97,11 +99,10 @@ class SharedExtractionService:
                     effective_url = effective_url.replace(placeholder, str(v))
 
             # 2. Append or update query string parameters not consumed by placeholders
-            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
             parsed = urlparse(effective_url)
             qs = parse_qs(parsed.query)
             for k, v in params.items():
-                if f"{{{k}}}" not in endpoint["target_url"]:
+                if f"{{{k}}}" not in effective_url:
                     qs[k] = [str(v)]
             new_query = urlencode(qs, doseq=True)
             effective_url = urlunparse((
@@ -113,6 +114,8 @@ class SharedExtractionService:
                 parsed.fragment,
             ))
             logger.info("[%s] Dynamic target URL parameterized with %s -> %s", endpoint_id, params, effective_url)
+        else:
+            effective_url = resolve_test_url(effective_url)
 
         return await self.extract(
             endpoint_id=endpoint["endpoint_id"],

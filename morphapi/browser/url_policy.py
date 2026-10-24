@@ -8,7 +8,7 @@ import ipaddress
 import re
 import socket
 from urllib.parse import urlparse
-from typing import Tuple
+from typing import Tuple, Any
 
 from morphapi.schemas.errors import FailureCode, SsrfSecurityError
 
@@ -150,3 +150,48 @@ def sanitize_text_for_llm(raw_text: str, max_chars: int = 50000) -> str:
         sanitized = sanitized[:max_chars] + "\n...[TRUNCATED_FOR_SIZE]"
 
     return sanitized
+
+
+def resolve_test_url(target_url: str, inputs: dict[str, Any] | None = None) -> str:
+    """
+    Universally resolves parameterized target URL templates for live browser verification.
+    Substitutes defaults from inputs metadata if available, cleans empty query filter placeholders,
+    and defaults pagination path segments to '1' without any hardcoded domain logic.
+    """
+    from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
+    import re
+
+    # Unquote URL-encoded braces (e.g. %7Bpage%7D -> {page})
+    url = unquote(target_url)
+
+    # 1. Substitute explicit default values from inputs definition if present
+    if inputs and isinstance(inputs, dict):
+        for param_name, param_meta in inputs.items():
+            if isinstance(param_meta, dict):
+                def_val = param_meta.get("default")
+                if def_val is not None:
+                    url = re.sub(rf"\{{{param_name}\}}", str(def_val), url, flags=re.IGNORECASE)
+
+    # 2. For remaining query placeholders (e.g. ?batch={batch} or &filter={x}), strip empty filter params
+    parsed = urlparse(url)
+    if "{" in parsed.query and "}" in parsed.query:
+        qs = parse_qs(parsed.query)
+        clean_qs = {k: [v for v in vals if "{" not in v] for k, vals in qs.items()}
+        clean_qs = {k: v for k, v in clean_qs.items() if v}
+        new_query = urlencode(clean_qs, doseq=True)
+        url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+
+    # 3. For remaining path placeholders (e.g. /page/{page}/ or page-{page}.html)
+    if "{" in url and "}" in url:
+        url = re.sub(r"page[-_]\{[a-zA-Z0-9_]+\}\.html", "page-1.html", url, flags=re.IGNORECASE)
+        url = re.sub(r"page[-_/]\{[a-zA-Z0-9_]+\}", "page/1", url, flags=re.IGNORECASE)
+        url = re.sub(r"\{(?:page|p|page_num|pg|offset|num|index|start)\}", "1", url, flags=re.IGNORECASE)
+        url = re.sub(r"\{[a-zA-Z0-9_]+\}", "", url)
+
+    # Clean redundant double slashes in path (e.g. com//page/1/ -> com/page/1/)
+    parsed = urlparse(url)
+    clean_path = re.sub(r"/+", "/", parsed.path)
+    url = urlunparse((parsed.scheme, parsed.netloc, clean_path, parsed.params, parsed.query, parsed.fragment))
+
+    return url
+

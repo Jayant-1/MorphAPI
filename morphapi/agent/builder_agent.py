@@ -235,19 +235,9 @@ class DeepAgentsHarness:
         # Action 1: Scoped Browser Inspection (Tool: inspect_website)
         # -------------------------------------------------------------
         # Resolve any template placeholders for live inspection/testing in Chromium
-        inspection_url = target_url
-        if "{" in target_url and "}" in target_url:
-            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-            parsed = urlparse(target_url)
-            if "{" in parsed.query:
-                # For query parameter templates (e.g. ?batch={batch}), strip template filters to load base listing
-                qs = parse_qs(parsed.query)
-                clean_qs = {k: [v for v in vals if "{" not in v] for k, vals in qs.items()}
-                clean_qs = {k: v for k, v in clean_qs.items() if v}
-                new_q = urlencode(clean_qs, doseq=True)
-                inspection_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_q, parsed.fragment))
-            else:
-                inspection_url = re.sub(r"\{[a-zA-Z0-9_]+\}", "2025", target_url)
+        from morphapi.browser.url_policy import resolve_test_url
+        inspection_url = resolve_test_url(target_url)
+        if inspection_url != target_url:
             logger.info("[Deep Agent ReAct] Template target URL '%s' resolved to sample inspection URL '%s'", target_url, inspection_url)
 
         logger.info("[Deep Agent ReAct] [STAGE 1: INSPECTION] Invoking tool: inspect_website(url='%s')", inspection_url)

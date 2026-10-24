@@ -221,10 +221,11 @@ class EndpointService:
                 match_counts[k] = 1
         else:
             # Live browser extraction test
-            effective_test_url = target_url
-            if "{" in target_url and "}" in target_url:
-                import re
-                effective_test_url = re.sub(r"\{[a-zA-Z0-9_]+\}", "W25", target_url)
+            from morphapi.browser.url_policy import resolve_test_url
+            endpoint_record = await self.endpoint_repo.get_endpoint(endpoint_id)
+            ep_hints = endpoint_record.get("extraction_hints", {}) if endpoint_record else {}
+            ep_inputs = ep_hints.get("inputs", {}) if isinstance(ep_hints, dict) else {}
+            effective_test_url = resolve_test_url(target_url, inputs=ep_inputs)
 
             logger.info(f"Running deterministic browser verification for version {version_id} on {effective_test_url}")
             extract_res: ExtractionResult = await self.extractor.extract(
@@ -539,6 +540,7 @@ class EndpointService:
         discovered_name = agent_synthesis.get("name") or name or f"Web API for {slug}"
         rationale = agent_synthesis.get("rationale") or "Deep Agent candidate proposal"
         evidence_refs = [agent_synthesis["evidence_ref"]] if agent_synthesis.get("evidence_ref") else []
+        discovered_inputs = agent_synthesis.get("inputs", {})
 
         if not agent_synthesis.get("verified", True):
             logger.warning("[Backend Gate] Deep Agent ReAct loop could not verify candidate selectors live.")
@@ -562,6 +564,7 @@ class EndpointService:
                 target_url=url,
                 schema_definition=schema,
                 name=discovered_name,
+                extraction_hints={"inputs": discovered_inputs},
             )
         else:
             if existing_check and existing_check["tenant_id"] != tenant_id:
@@ -572,6 +575,7 @@ class EndpointService:
                 target_url=url,
                 schema_definition=schema,
                 initial_selectors=selectors,
+                extraction_hints={"inputs": discovered_inputs},
             )
             created_ep = await self.create_endpoint_draft(draft_req, tenant_id=tenant_id)
             endpoint_id = created_ep.endpoint_id
@@ -610,15 +614,19 @@ class EndpointService:
             version_repo=self.version_repo,
             auditor=self.auditor,
         )
-        sample_params = {}
-        if "{" in url and "}" in url:
-            sample_params = {"batch": "W25", "year": "2025"}
+        inputs = agent_synthesis.get("inputs", {})
+        sample_params: dict[str, Any] = {}
+        if isinstance(inputs, dict):
+            for param_name, param_meta in inputs.items():
+                if isinstance(param_meta, dict):
+                    def_val = param_meta.get("default")
+                    if def_val not in (None, ""):
+                        sample_params[param_name] = def_val
+
         sample_resp = await extraction_svc.extract_endpoint(endpoint_id, tenant_id=tenant_id, params=sample_params)
         sample_items = sample_resp.data if isinstance(sample_resp.data, list) else [sample_resp.data]
 
         api_key = f"mapik_{slug[:12]}_{secrets.token_hex(12)}"
-
-        inputs = agent_synthesis.get("inputs", {})
         user_scope = tenant_id if tenant_id and tenant_id not in ("default_tenant", "string") else "default"
         endpoint_path = f"/v1/api/{user_scope}/{slug}"
         full_endpoint_url = f"http://localhost:8000{endpoint_path}"

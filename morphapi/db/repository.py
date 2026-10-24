@@ -241,18 +241,30 @@ class EndpointRepository:
         target_url: str,
         schema_definition: dict[str, str],
         name: str | None = None,
+        extraction_hints: dict[str, Any] | None = None,
     ) -> None:
         conn = await get_db_connection(self.db_path)
         try:
-            if name:
+            now = _now()
+            if extraction_hints is not None and name:
+                await conn.execute(
+                    "UPDATE endpoints SET target_url = ?, schema_definition = ?, name = ?, extraction_hints = ?, updated_at = ? WHERE endpoint_id = ?",
+                    (target_url, json.dumps(schema_definition), name, json.dumps(extraction_hints), now, endpoint_id),
+                )
+            elif extraction_hints is not None:
+                await conn.execute(
+                    "UPDATE endpoints SET target_url = ?, schema_definition = ?, extraction_hints = ?, updated_at = ? WHERE endpoint_id = ?",
+                    (target_url, json.dumps(schema_definition), json.dumps(extraction_hints), now, endpoint_id),
+                )
+            elif name:
                 await conn.execute(
                     "UPDATE endpoints SET target_url = ?, schema_definition = ?, name = ?, updated_at = ? WHERE endpoint_id = ?",
-                    (target_url, json.dumps(schema_definition), name, _now(), endpoint_id),
+                    (target_url, json.dumps(schema_definition), name, now, endpoint_id),
                 )
             else:
                 await conn.execute(
                     "UPDATE endpoints SET target_url = ?, schema_definition = ?, updated_at = ? WHERE endpoint_id = ?",
-                    (target_url, json.dumps(schema_definition), _now(), endpoint_id),
+                    (target_url, json.dumps(schema_definition), now, endpoint_id),
                 )
             await conn.commit()
         finally:
