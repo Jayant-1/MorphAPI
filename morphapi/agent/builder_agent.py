@@ -243,6 +243,37 @@ class DeepAgentsHarness:
         pruned_dom = inspect_res.get("pruned_dom_sample", "")
         logger.info("[Deep Agent] [STAGE 1 SUCCESS] Rendered Page Title: '%s' | Extracted DOM: %d characters", page_title, len(pruned_dom))
 
+        # Check if user requested detailed tabular/data records (prices, rates, resolutions, items)
+        # but the current page is an index/directory page containing report/view links
+        from bs4 import BeautifulSoup
+        soup_check = BeautifulSoup(pruned_dom, "html.parser")
+        has_table = bool(soup_check.find("table"))
+        user_wants_data = any(w in prompt.lower() for w in ["price", "rate", "cost", "mandi", "wholesale", "resolution", "report", "table"])
+        if not has_table and user_wants_data:
+            from urllib.parse import urljoin
+            drilldown_candidates = []
+            for a in soup_check.find_all("a", href=True):
+                href = a["href"].strip()
+                if not href or href.startswith("#") or href.startswith("javascript:"):
+                    continue
+                href_lower = href.lower()
+                text_lower = a.get_text(strip=True).lower()
+                if any(w in href_lower or w in text_lower for w in ["view", "detail", "report", "download", "daily"]):
+                    full_href = urljoin(target_url, href)
+                    if full_href.startswith("http") and not full_href.endswith("#") and full_href.split("#")[0] != target_url.split("#")[0]:
+                        drilldown_candidates.append(full_href)
+            
+            if drilldown_candidates:
+                drill_url = drilldown_candidates[0]
+                logger.info("[Deep Agent] [STAGE 1 DRILLDOWN] Directory page detected for data query. Navigating to report page: %s", drill_url)
+                drill_res = await self.execute_tool("inspect_website", {"url": drill_url})
+                if drill_res and "pruned_dom_sample" in drill_res:
+                    target_url = drill_url
+                    evidence_ref = drill_res.get("evidence_ref") or evidence_ref
+                    page_title = drill_res.get("page_title", "") or page_title
+                    pruned_dom = drill_res.get("pruned_dom_sample", "")
+                    logger.info("[Deep Agent] [STAGE 1 DRILLDOWN SUCCESS] Loaded report page '%s' (%d chars)", page_title, len(pruned_dom))
+
         # -------------------------------------------------------------
         # Stage 2: Deep Agent Reasoning & Selector Discovery
         # -------------------------------------------------------------
@@ -281,8 +312,7 @@ class DeepAgentsHarness:
             logger.info("[Deep Agent] [STAGE 2: MODEL RESPONSE] Raw model output received (%d chars)", len(raw_text))
 
             # Extract JSON from model response
-            from morphapi.agent.nim_provider import extract_json_from_response
-            parsed = extract_json_from_response(raw_text)
+            parsed = self.provider._extract_json(raw_text)
             if isinstance(parsed, dict) and "selectors" in parsed and "schema_definition" in parsed:
                 discovered_name = discovered_name or parsed.get("name")
                 schema_def = parsed["schema_definition"]
@@ -296,52 +326,90 @@ class DeepAgentsHarness:
 
         # Fallback / Semantic DOM Analyzer if NIM is offline, queued, or model returned empty
         if not nim_success:
-            logger.info("[Deep Agent] [STAGE 2: SEMANTIC DOM ANALYZER] Parsing structural layout and repeating patterns...")
-            if "sarthi" in target_url.lower():
-                discovered_name = discovered_name or "Sarthi Government Resolutions"
-                schema_def = {
-                    "sr_no": "int",
-                    "department": "str",
-                    "description": "str",
-                    "date": "str",
-                    "doc_link": "str",
-                }
-                candidate_selectors = {
-                    "sr_no": "table tr td:nth-child(1)",
-                    "department": "table tr td:nth-child(2)",
-                    "description": "table tr td:nth-child(3)",
-                    "date": "table tr td:nth-child(4)",
-                    "doc_link": "table tr td:nth-child(5) a",
-                }
-                rationale = "Identified tabular government resolution layout with document view links in column 5"
-            elif "apmc" in target_url.lower():
-                discovered_name = discovered_name or "Pune APMC Daily Market Prices"
-                if "dates" in target_url.lower() or "bhusar" in target_url.lower():
-                    schema_def = {
-                        "date": "str",
-                        "price_link": "str",
-                    }
-                    candidate_selectors = {
-                        "date": ".card strong",
-                        "price_link": ".card a[href*='view']",
-                    }
-                    rationale = "Identified daily bajarbhav date cards with corresponding view links"
-                else:
-                    schema_def = {
-                        "market_name": "str",
-                        "price_link": "str",
-                    }
-                    candidate_selectors = {
-                        "market_name": "h5",
-                        "price_link": "a[href*='bajarbhav']",
-                    }
-                    rationale = "Identified market yard commodity cards with corresponding daily rate links"
+            logger.info("[Deep Agent] [STAGE 2: GENERIC DOM ANALYZER] Dynamically parsing structural layout without hardcoded rules...")
+            soup_layout = BeautifulSoup(pruned_dom, "html.parser")
+            tables = soup_layout.find_all("table")
+            
+            if tables:
+                t = tables[0]
+                rows = t.find_all("tr")
+                th_elements = t.find_all("th")
+                headers = []
+                if th_elements:
+                    headers = [re.sub(r"[^a-zA-Z0-9_]", "_", th.get_text(strip=True).lower()).strip("_") for th in th_elements]
+                elif len(rows) > 1:
+                    first_cols = [re.sub(r"[^a-zA-Z0-9_]", "_", td.get_text(strip=True).lower()).strip("_") for td in rows[0].find_all(["td", "th"])]
+                    if any(c for c in first_cols):
+                        headers = first_cols
+
+                data_row = rows[1] if len(rows) > 1 else (rows[0] if rows else None)
+                data_cells = data_row.find_all(["td", "th"]) if data_row else []
+                num_cols = len(data_cells) or len(headers) or 1
+
+                schema_def = {}
+                candidate_selectors = {}
+                for idx in range(1, num_cols + 1):
+                    header_cand = headers[idx - 1] if idx - 1 < len(headers) and headers[idx - 1] else ""
+                    cell = data_cells[idx - 1] if idx - 1 < len(data_cells) else None
+                    cell_text = cell.get_text(strip=True) if cell else ""
+                    has_anchor = bool(cell and cell.find("a"))
+
+                    if not header_cand:
+                        if has_anchor:
+                            header_cand = "doc_link" if "resolution" in prompt.lower() or "doc" in prompt.lower() else "link"
+                        elif re.match(r"^\d+$", cell_text):
+                            header_cand = "sr_no" if idx == 1 else f"metric_{idx}"
+                        elif any(w in cell_text.lower() for w in ["202", "201", "/20", "-20"]):
+                            header_cand = "date"
+                        else:
+                            header_cand = f"col_{idx}"
+
+                    final_key = header_cand
+                    k_suffix = 1
+                    while final_key in schema_def:
+                        final_key = f"{header_cand}_{k_suffix}"
+                        k_suffix += 1
+
+                    if has_anchor:
+                        schema_def[final_key] = "str"
+                        candidate_selectors[final_key] = f"table tr td:nth-child({idx}) a"
+                    else:
+                        if re.match(r"^\d+$", cell_text):
+                            schema_def[final_key] = "int"
+                        elif re.match(r"^\d+\.\d+$", cell_text):
+                            schema_def[final_key] = "float"
+                        else:
+                            schema_def[final_key] = "str"
+                        candidate_selectors[final_key] = f"table tr td:nth-child({idx})"
+
+                rationale = f"Discovered dynamic tabular layout with {num_cols} structural columns"
             else:
-                domain = re.sub(r"https?://(www\.)?", "", target_url).split("/")[0].replace(".", "-")
-                discovered_name = discovered_name or f"Web API for {domain}"
-                schema_def = {"title": "str", "link": "str"}
-                candidate_selectors = {"title": "h1, h2, h3, a", "link": "a"}
-                rationale = "Extracted prominent structural headings and hyperlink elements"
+                cards = soup_layout.select(".card, article, [class*='card'], [class*='item'], li")
+                if cards:
+                    sample_card = cards[0]
+                    schema_def = {}
+                    candidate_selectors = {}
+                    h = sample_card.find(["h1", "h2", "h3", "h4", "h5", "h6", "strong", "b"])
+                    if h:
+                        schema_def["title"] = "str"
+                        candidate_selectors["title"] = h.name
+                    a = sample_card.find("a")
+                    if a:
+                        schema_def["link"] = "str"
+                        candidate_selectors["link"] = "a"
+                    p = sample_card.find(["p", "span"])
+                    if p and p != h:
+                        schema_def["detail"] = "str"
+                        candidate_selectors["detail"] = p.name
+                    if not schema_def:
+                        schema_def = {"title": "str", "link": "str"}
+                        candidate_selectors = {"title": "h1, h2, h3, a", "link": "a"}
+                    rationale = f"Discovered repeating container blocks with {len(schema_def)} structural fields"
+                else:
+                    domain = re.sub(r"https?://(www\.)?", "", target_url).split("/")[0].replace(".", "-")
+                    schema_def = {"title": "str", "link": "str"}
+                    candidate_selectors = {"title": "h1, h2, h3, a", "link": "a"}
+                    rationale = "Extracted prominent structural headings and hyperlink elements"
 
             logger.info("[Deep Agent] [STAGE 2: DOM PROPOSAL] Discovered schema: %s", schema_def)
             logger.info("[Deep Agent] [STAGE 2: DOM PROPOSAL] Discovered candidate selectors: %s", candidate_selectors)
@@ -371,6 +439,7 @@ class DeepAgentsHarness:
 
         return {
             "name": discovered_name,
+            "target_url": target_url,
             "schema_definition": schema_def,
             "selectors": candidate_selectors,
             "rationale": rationale,

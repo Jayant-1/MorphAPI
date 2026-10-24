@@ -427,9 +427,12 @@ class EndpointService:
 
         # Derive slug and name
         if not name:
-            if "sarthi" in url.lower():
-                name = "Sarthi Government Resolutions"
-                slug = "sarthi-government-resolution"
+            path_parts = [p for p in url.split("?")[0].split("/") if p and not p.startswith("http")]
+            if len(path_parts) > 1:
+                domain_prefix = path_parts[0].replace("www.", "").split(".")[0]
+                last_slug = path_parts[-1].replace(".html", "").replace(".php", "")
+                slug = f"{domain_prefix}-{last_slug}"[:40]
+                name = slug.replace("-", " ").title()
             else:
                 domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0].replace(".", "-")
                 name = f"Web API for {domain}"
@@ -465,6 +468,7 @@ class EndpointService:
             target_url=url,
             name=name,
         )
+        url = agent_synthesis.get("target_url") or url
         schema = agent_synthesis["schema_definition"]
         selectors = agent_synthesis["selectors"]
         discovered_name = agent_synthesis.get("name") or name or f"Web API for {slug}"
