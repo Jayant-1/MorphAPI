@@ -14,6 +14,8 @@ class FailureCode(str, Enum):
     DISALLOWED_URL = "DISALLOWED_URL"
     DISALLOWED_REDIRECT = "DISALLOWED_REDIRECT"
     DNS_RESOLUTION_FAILED = "DNS_RESOLUTION_FAILED"
+    POLICY_BLOCKED = "POLICY_BLOCKED"
+    POLICY_REVIEW_REQUIRED = "POLICY_REVIEW_REQUIRED"
 
     # Browser Execution
     BROWSER_TIMEOUT = "BROWSER_TIMEOUT"
@@ -64,6 +66,11 @@ class MorphApiError(Exception):
 class SsrfSecurityError(MorphApiError):
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(FailureCode.SSRF_DETECTED, message, details=details, retryable=False)
+
+
+class SourcePolicyBlockedError(MorphApiError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(FailureCode.POLICY_BLOCKED, message, details=details, retryable=False)
 
 
 class BrowserExecutionError(MorphApiError):

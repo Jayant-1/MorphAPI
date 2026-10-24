@@ -4,10 +4,25 @@ Canonical contracts shared between Person 1 (Backend/Registry), Person 2 (Browse
 """
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Literal
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from morphapi.schemas.errors import FailureCode
+
+class PolicyOutcome(str, Enum):
+    ALLOW = "allow"
+    REVIEW = "review"
+    BLOCK = "block"
+
+
+class SourcePolicyDecision(BaseModel):
+    url: str
+    outcome: PolicyOutcome
+    robots_allowed: bool | None = None
+    reason: str
+    evidence_urls: list[str] = Field(default_factory=list)
+    requires_human_review: bool = False
 
 EndpointStatus = Literal[
     "DRAFT",

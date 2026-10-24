@@ -220,228 +220,240 @@ class DeepAgentsHarness:
         name: str | None = None,
     ) -> dict[str, Any]:
         """
-        Agentic synthesis: Deep Agent analyzes user prompt and rendered website to discover
-        appropriate schema and candidate selectors using scoped browser tools.
-        Includes structured step-by-step logging of intermediate reasoning stages.
+        Agentic synthesis: ReAct Loop (Thought -> Action -> Observation -> Reflection).
+        Analyzes user prompt and rendered website to discover schema and candidate selectors,
+        verifying each candidate live in Chromium and self-correcting any selector failures.
         """
         import re
+        from bs4 import BeautifulSoup
 
         logger.info("================================================================================")
-        logger.info("[Deep Agent] [START] Initiating Agentic synthesis for prompt: '%s'", prompt)
-        logger.info("[Deep Agent] [TARGET] URL: %s", target_url)
+        logger.info("[Deep Agent ReAct] [START] Initiating Agentic ReAct synthesis for prompt: '%s'", prompt)
+        logger.info("[Deep Agent ReAct] [TARGET] URL: %s", target_url)
 
         # -------------------------------------------------------------
-        # Stage 1: Scoped Browser Inspection (Tool: inspect_website)
+        # Action 1: Scoped Browser Inspection (Tool: inspect_website)
         # -------------------------------------------------------------
-        logger.info("[Deep Agent] [STAGE 1: INSPECTION] Invoking tool: inspect_website(url='%s')", target_url)
+        logger.info("[Deep Agent ReAct] [STAGE 1: INSPECTION] Invoking tool: inspect_website(url='%s')", target_url)
         inspect_res = await self.execute_tool("inspect_website", {"url": target_url})
         if inspect_res.get("error"):
-            logger.warning("[Deep Agent] [WARN] inspect_website reported error: %s", inspect_res["error"])
-        
+            logger.warning("[Deep Agent ReAct] [WARN] inspect_website reported error: %s", inspect_res["error"])
+
         evidence_ref = inspect_res.get("evidence_ref", "")
         page_title = inspect_res.get("page_title", "")
         pruned_dom = inspect_res.get("pruned_dom_sample", "")
-        logger.info("[Deep Agent] [STAGE 1 SUCCESS] Rendered Page Title: '%s' | Extracted DOM: %d characters", page_title, len(pruned_dom))
+        logger.info("[Deep Agent ReAct] [STAGE 1 SUCCESS] Rendered Page Title: '%s' | Extracted DOM: %d characters", page_title, len(pruned_dom))
 
-        # Check if user requested detailed tabular/data records (prices, rates, resolutions, items)
-        # but the current page is an index/directory page containing report/view links
-        from bs4 import BeautifulSoup
-        soup_check = BeautifulSoup(pruned_dom, "html.parser")
-        has_table = bool(soup_check.find("table"))
-        user_wants_data = any(w in prompt.lower() for w in ["price", "rate", "cost", "mandi", "wholesale", "resolution", "report", "table"])
-        is_directory_url = any(p in target_url.lower() for p in ["/dates", "/archive", "/list", "/directory", "/categories", "/index"])
-        
-        if not has_table and (user_wants_data or is_directory_url):
-            from urllib.parse import urljoin
-            drilldown_candidates = []
-            content_containers = soup_check.select(".card, article, main, #content, .content, [class*='container']") or [soup_check]
-            for container in content_containers:
-                for a in container.find_all("a", href=True):
-                    if a.find_parent(["nav", "header"]) or any("menu" in c.lower() or "nav" in c.lower() for c in (a.get("class") or [])):
-                        continue
-                    href = a["href"].strip()
-                    if not href or href.startswith("#") or href.startswith("javascript:"):
-                        continue
-                    href_lower = href.lower()
-                    text_lower = a.get_text(strip=True).lower()
-                    if any(w in href_lower or w in text_lower for w in ["view", "detail", "report", "download", "daily", "bajarbhav"]):
-                        full_href = urljoin(target_url, href)
-                        if full_href.startswith("http") and not full_href.endswith("#") and full_href.split("#")[0] != target_url.split("#")[0]:
-                            if full_href not in drilldown_candidates:
-                                drilldown_candidates.append(full_href)
-            
-            if drilldown_candidates:
-                drill_url = drilldown_candidates[0]
-                logger.info("[Deep Agent] [STAGE 1 DRILLDOWN] Directory page detected for data query. Navigating to report page: %s", drill_url)
-                drill_res = await self.execute_tool("inspect_website", {"url": drill_url})
-                if drill_res and "pruned_dom_sample" in drill_res:
-                    target_url = drill_url
-                    evidence_ref = drill_res.get("evidence_ref") or evidence_ref
-                    page_title = drill_res.get("page_title", "") or page_title
-                    pruned_dom = drill_res.get("pruned_dom_sample", "")
-                    logger.info("[Deep Agent] [STAGE 1 DRILLDOWN SUCCESS] Loaded report page '%s' (%d chars)", page_title, len(pruned_dom))
-
-        # -------------------------------------------------------------
-        # Stage 2: Deep Agent Reasoning & Selector Discovery
-        # -------------------------------------------------------------
-        logger.info("[Deep Agent] [STAGE 2: REASONING] Analyzing rendered DOM against user prompt...")
-        
         discovered_name = name
         schema_def: dict[str, str] = {}
         candidate_selectors: dict[str, str] = {}
-        rationale = "Candidate selectors discovered through Deep Agent DOM structural analysis"
+        rationale = "Candidate selectors discovered and verified through ReAct browser testing"
 
-        # Try calling configured NVIDIA NIM model
-        nim_success = False
-        try:
-            logger.info("[Deep Agent] [STAGE 2: LLM CALL] Dispatching reasoning request to NVIDIA NIM model: %s", self.provider.model_id)
-            system_msg = (
-                "You are an expert browser automation and web extraction engineer for MorphAPI. "
-                "Analyze the user request and rendered DOM to propose CSS selectors and typed schema. "
-                "Return valid JSON with keys: name (str), schema_definition (dict of str to type: str, int, float, bool), "
-                "selectors (dict of field name to CSS selector), rationale (str)."
-            )
-            user_msg = (
-                f"User Request: {prompt}\n"
-                f"Target URL: {target_url}\n"
-                f"Page Title: {page_title}\n"
-                f"Rendered Semantic DOM:\n{pruned_dom[:6000]}\n"
-            )
-            completion = await self.provider.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg},
-                ],
-                temperature=0.1,
-                max_tokens=1024,
-            )
-            raw_text = completion.choices[0].message.content or ""
-            logger.info("[Deep Agent] [STAGE 2: MODEL RESPONSE] Raw model output received (%d chars)", len(raw_text))
+        # Extract focused DOM sample for the model
+        soup_page = BeautifulSoup(pruned_dom, "html.parser")
+        main_content = soup_page.find(["main", "article", "table"]) or soup_page.find(id="content") or soup_page
+        dom_sample = str(main_content)[:25000]
 
-            # Extract JSON from model response
-            parsed = self.provider._extract_json(raw_text)
-            if isinstance(parsed, dict) and "selectors" in parsed and "schema_definition" in parsed:
-                discovered_name = discovered_name or parsed.get("name")
-                schema_def = parsed["schema_definition"]
-                candidate_selectors = parsed["selectors"]
-                rationale = parsed.get("rationale", rationale)
-                nim_success = True
-                logger.info("[Deep Agent] [STAGE 2: NIM SUCCESS] Model proposed schema: %s", schema_def)
-                logger.info("[Deep Agent] [STAGE 2: NIM SUCCESS] Model proposed candidate selectors: %s", candidate_selectors)
-        except Exception as nim_err:
-            logger.info("[Deep Agent] [STAGE 2: NIM NOTICE] NIM remote inference returned: %s. Proceeding with Deep Agent Semantic DOM analyzer.", nim_err)
+        # -------------------------------------------------------------
+        # ReAct Loop: Thought -> Action -> Observation -> Reflection
+        # -------------------------------------------------------------
+        max_turns = 3
+        turn = 0
+        is_verified = False
+        audit_history: list[dict[str, Any]] = []
 
-        # Fallback / Semantic DOM Analyzer if NIM is offline, queued, or model returned empty
-        if not nim_success:
-            logger.info("[Deep Agent] [STAGE 2: GENERIC DOM ANALYZER] Dynamically parsing structural layout without hardcoded rules...")
-            soup_layout = BeautifulSoup(pruned_dom, "html.parser")
-            tables = soup_layout.find_all("table")
-            
-            if tables:
-                t = tables[0]
-                rows = t.find_all("tr")
-                th_elements = t.find_all("th")
-                headers = []
-                if th_elements:
-                    headers = [re.sub(r"[^a-zA-Z0-9_]", "_", th.get_text(strip=True).lower()).strip("_") for th in th_elements]
-                elif len(rows) > 1:
-                    first_cols = [re.sub(r"[^a-zA-Z0-9_]", "_", td.get_text(strip=True).lower()).strip("_") for td in rows[0].find_all(["td", "th"])]
-                    if any(c for c in first_cols):
-                        headers = first_cols
+        system_msg = (
+            "You are an expert browser automation and web extraction engineer for MorphAPI. "
+            "Analyze the user request and rendered DOM to propose CSS selectors and typed schema. "
+            "Identify repeating rows, cards, or items on the page. "
+            "For tables, account for row headers (<th scope='row'>) as well as data cells (<td>). "
+            "Return ONLY valid JSON with keys:\n"
+            "  \"name\": string display name for the API,\n"
+            "  \"schema_definition\": dictionary of field name to type (\"str\", \"int\", \"float\", \"bool\"),\n"
+            "  \"selectors\": dictionary of field name to valid CSS selector matching each record's field,\n"
+            "  \"rationale\": string explanation of why these selectors match the target items."
+        )
 
-                data_row = rows[1] if len(rows) > 1 else (rows[0] if rows else None)
-                data_cells = data_row.find_all(["td", "th"]) if data_row else []
-                num_cols = len(data_cells) or len(headers) or 1
+        conversation_messages: list[dict[str, str]] = [
+            {"role": "system", "content": system_msg},
+            {
+                "role": "user",
+                "content": (
+                    f"User Request: {prompt}\n"
+                    f"Target URL: {target_url}\n"
+                    f"Page Title: {page_title}\n"
+                    f"Rendered Semantic DOM:\n{dom_sample}\n"
+                ),
+            },
+        ]
 
-                schema_def = {}
-                candidate_selectors = {}
-                for idx in range(1, num_cols + 1):
-                    header_cand = headers[idx - 1] if idx - 1 < len(headers) and headers[idx - 1] else ""
-                    cell = data_cells[idx - 1] if idx - 1 < len(data_cells) else None
-                    cell_text = cell.get_text(strip=True) if cell else ""
-                    has_anchor = bool(cell and cell.find("a"))
+        while turn < max_turns and not is_verified:
+            turn += 1
+            logger.info("[Deep Agent ReAct] [TURN %d/%d] [THOUGHT] Reasoning over page layout and field requirements...", turn, max_turns)
 
-                    if not header_cand:
-                        if has_anchor:
-                            header_cand = "doc_link" if "resolution" in prompt.lower() or "doc" in prompt.lower() else "link"
-                        elif re.match(r"^\d+$", cell_text):
-                            header_cand = "sr_no" if idx == 1 else f"metric_{idx}"
-                        elif any(w in cell_text.lower() for w in ["202", "201", "/20", "-20"]):
-                            header_cand = "date"
-                        else:
-                            header_cand = f"col_{idx}"
+            # Stage 2: Ask Model for Proposal (or Correction)
+            nim_turn_success = False
+            try:
+                logger.info("[Deep Agent ReAct] [TURN %d] [LLM CALL] Querying NVIDIA NIM model: %s", turn, self.provider.model_id)
+                completion = await self.provider.create_chat_completion(
+                    messages=conversation_messages,
+                    temperature=0.1,
+                    max_tokens=1024,
+                )
+                raw_text = completion.choices[0].message.content or ""
+                logger.info("[Deep Agent ReAct] [TURN %d] [MODEL RESPONSE] Received (%d chars)", turn, len(raw_text))
 
-                    final_key = header_cand
-                    k_suffix = 1
-                    while final_key in schema_def:
-                        final_key = f"{header_cand}_{k_suffix}"
-                        k_suffix += 1
+                parsed = self.provider._extract_json(raw_text)
+                if isinstance(parsed, dict) and "selectors" in parsed and "schema_definition" in parsed:
+                    discovered_name = discovered_name or parsed.get("name")
+                    schema_def = parsed["schema_definition"]
+                    candidate_selectors = parsed["selectors"]
+                    rationale = parsed.get("rationale", rationale)
+                    nim_turn_success = True
+                    logger.info("[Deep Agent ReAct] [TURN %d] Model proposed schema: %s", turn, schema_def)
+                    logger.info("[Deep Agent ReAct] [TURN %d] Model proposed selectors: %s", turn, candidate_selectors)
 
-                    if has_anchor:
-                        schema_def[final_key] = "str"
-                        candidate_selectors[final_key] = f"table tr td:nth-child({idx}) a"
-                    else:
-                        if re.match(r"^\d+$", cell_text):
-                            schema_def[final_key] = "int"
-                        elif re.match(r"^\d+\.\d+$", cell_text):
-                            schema_def[final_key] = "float"
-                        else:
-                            schema_def[final_key] = "str"
-                        candidate_selectors[final_key] = f"table tr td:nth-child({idx})"
+                    # Append assistant message to conversation history
+                    conversation_messages.append({"role": "assistant", "content": raw_text})
+            except Exception as nim_err:
+                logger.warning("[Deep Agent ReAct] [TURN %d] NIM call encountered: %s", turn, nim_err)
 
-                rationale = f"Discovered dynamic tabular layout with {num_cols} structural columns"
-            else:
-                cards = soup_layout.select(".card, article, [class*='card'], [class*='item'], li")
-                if cards:
-                    sample_card = cards[0]
+            # If NIM was unable to produce valid selectors on turn 1, use Semantic DOM Analyzer
+            if not nim_turn_success and turn == 1:
+                logger.info("[Deep Agent ReAct] [STAGE 2: GENERIC DOM ANALYZER] Dynamically analyzing structural layout...")
+                tables = soup_page.find_all("table")
+                if tables:
+                    t = tables[0]
+                    rows = t.find_all("tr")
+                    th_elements = t.find_all("th")
+                    headers = []
+                    if th_elements:
+                        headers = [re.sub(r"[^a-zA-Z0-9_]", "_", th.get_text(strip=True).lower()).strip("_") for th in th_elements]
+                    elif len(rows) > 1:
+                        headers = [re.sub(r"[^a-zA-Z0-9_]", "_", td.get_text(strip=True).lower()).strip("_") for td in rows[0].find_all(["td", "th"])]
+
+                    data_row = rows[1] if len(rows) > 1 else (rows[0] if rows else None)
+                    data_cells = data_row.find_all(["td", "th"]) if data_row else []
+                    num_cols = len(data_cells) or len(headers) or 1
+
                     schema_def = {}
                     candidate_selectors = {}
-                    h = sample_card.find(["h1", "h2", "h3", "h4", "h5", "h6", "strong", "b"])
-                    if h:
-                        schema_def["title"] = "str"
-                        candidate_selectors["title"] = h.name
-                    a = sample_card.find("a")
-                    if a:
-                        schema_def["link"] = "str"
-                        candidate_selectors["link"] = "a"
-                    p = sample_card.find(["p", "span"])
-                    if p and p != h:
-                        schema_def["detail"] = "str"
-                        candidate_selectors["detail"] = p.name
-                    if not schema_def:
+                    for idx in range(1, num_cols + 1):
+                        header_cand = headers[idx - 1] if idx - 1 < len(headers) and headers[idx - 1] else ""
+                        cell = data_cells[idx - 1] if idx - 1 < len(data_cells) else None
+                        cell_text = cell.get_text(strip=True) if cell else ""
+                        has_anchor = bool(cell and cell.find("a"))
+
+                        if not header_cand:
+                            header_cand = "link" if has_anchor else f"field_{idx}"
+
+                        final_key = header_cand
+                        k_suffix = 1
+                        while final_key in schema_def:
+                            final_key = f"{header_cand}_{k_suffix}"
+                            k_suffix += 1
+
+                        if has_anchor:
+                            schema_def[final_key] = "str"
+                            candidate_selectors[final_key] = f"table tr td:nth-child({idx}) a, table tr th a"
+                        else:
+                            schema_def[final_key] = "str"
+                            candidate_selectors[final_key] = f"table tr td:nth-child({idx}), table tr th:nth-child({idx})"
+
+                    rationale = f"Discovered dynamic tabular layout with {num_cols} structural columns"
+                else:
+                    cards = soup_page.select(".card, article, [class*='card'], [class*='item'], li")
+                    if cards:
+                        sample_card = cards[0]
+                        schema_def = {}
+                        candidate_selectors = {}
+                        h = sample_card.find(["h1", "h2", "h3", "h4", "h5", "h6", "strong", "b"])
+                        if h:
+                            schema_def["title"] = "str"
+                            candidate_selectors["title"] = h.name
+                        a = sample_card.find("a")
+                        if a:
+                            schema_def["link"] = "str"
+                            candidate_selectors["link"] = "a"
+                        p = sample_card.find(["p", "span"])
+                        if p and p != h:
+                            schema_def["detail"] = "str"
+                            candidate_selectors["detail"] = p.name
+                        if not schema_def:
+                            schema_def = {"title": "str", "link": "str"}
+                            candidate_selectors = {"title": "h1, h2, h3, a", "link": "a"}
+                        rationale = f"Discovered repeating container blocks with {len(schema_def)} structural fields"
+                    else:
                         schema_def = {"title": "str", "link": "str"}
                         candidate_selectors = {"title": "h1, h2, h3, a", "link": "a"}
-                    rationale = f"Discovered repeating container blocks with {len(schema_def)} structural fields"
-                else:
-                    domain = re.sub(r"https?://(www\.)?", "", target_url).split("/")[0].replace(".", "-")
-                    schema_def = {"title": "str", "link": "str"}
-                    candidate_selectors = {"title": "h1, h2, h3, a", "link": "a"}
-                    rationale = "Extracted prominent structural headings and hyperlink elements"
+                        rationale = "Extracted prominent structural headings and hyperlink elements"
 
-            logger.info("[Deep Agent] [STAGE 2: DOM PROPOSAL] Discovered schema: %s", schema_def)
-            logger.info("[Deep Agent] [STAGE 2: DOM PROPOSAL] Discovered candidate selectors: %s", candidate_selectors)
+            if not candidate_selectors:
+                logger.warning("[Deep Agent ReAct] [TURN %d] No candidate selectors generated.", turn)
+                continue
+
+            # Stage 3: Action: Live Selector Testing in Chromium (Tool: test_selectors)
+            logger.info("[Deep Agent ReAct] [TURN %d] [ACTION: TEST] Testing candidate selectors live in Chromium...", turn)
+            test_res = await self.execute_tool("test_selectors", {"page_ref": target_url, "candidates": candidate_selectors})
+            evidences = test_res.get("field_evidences", [])
+            match_summary = {fe["field_name"]: fe.get("matched_count", 0) for fe in evidences if "field_name" in fe}
+            logger.info("[Deep Agent ReAct] [TURN %d] [OBSERVATION] Live DOM match counts: %s", turn, match_summary)
+
+            audit_history.append({
+                "turn": turn,
+                "selectors": dict(candidate_selectors),
+                "match_summary": match_summary,
+            })
+
+            # Stage 4: Reflection & Self-Correction Evaluation
+            failing_fields = [f for f, count in match_summary.items() if count == 0]
+            error_details = []
+            for ev in evidences:
+                if ev.get("error"):
+                    error_details.append(f"Field '{ev['field_name']}': {ev['error']}")
+                elif ev.get("matched_count", 0) == 0:
+                    error_details.append(f"Field '{ev['field_name']}' matched 0 elements with selector '{ev.get('selector')}'")
+
+            if not failing_fields and candidate_selectors:
+                logger.info("[Deep Agent ReAct] [TURN %d] [VERIFIED] All fields matched real DOM elements live!", turn)
+                is_verified = True
+                break
+            else:
+                logger.warning("[Deep Agent ReAct] [TURN %d] [REFLECTION] Validation failed for fields: %s", turn, failing_fields)
+
+                # Extract context snippet of the first table row or card to help the model self-correct
+                sample_snippet = ""
+                sample_tr = soup_page.find("tr")
+                if sample_tr and sample_tr.parent:
+                    # Get the second row if header is first
+                    all_trs = soup_page.find_all("tr")
+                    row_target = all_trs[1] if len(all_trs) > 1 else all_trs[0]
+                    sample_snippet = str(row_target)[:800]
+                elif soup_page.find(".card, article, [class*='item']"):
+                    c = soup_page.find(".card, article, [class*='item']")
+                    sample_snippet = str(c)[:800]
+
+                feedback_msg = (
+                    f"Observation from live browser testing:\n"
+                    f"Errors:\n" + "\n".join(error_details) + "\n\n"
+                    f"Sample element snippet from live page:\n{sample_snippet}\n\n"
+                    f"Reflect on why the selectors failed (check for invalid syntax, or elements inside <th> instead of <td>). "
+                    f"Provide corrected CSS selectors for ALL fields in the required JSON format."
+                )
+                conversation_messages.append({"role": "user", "content": feedback_msg})
 
         # -------------------------------------------------------------
-        # Stage 3: Live Selector Testing (Tool: test_selectors)
+        # Final Stage: Candidate Submission (Tool: submit_candidate_configuration)
         # -------------------------------------------------------------
-        logger.info("[Deep Agent] [STAGE 3: LIVE SELECTOR TEST] Testing proposed selectors live in Chromium...")
-        test_res = await self.execute_tool("test_selectors", {"page_ref": target_url, "candidates": candidate_selectors})
-        evidences = test_res.get("field_evidences", [])
-        match_summary = {fe["field_name"]: fe["matched_count"] for fe in evidences if "field_name" in fe}
-        logger.info("[Deep Agent] [STAGE 3: RESULTS] Live DOM match counts: %s", match_summary)
-
-        # -------------------------------------------------------------
-        # Stage 4: Candidate Submission (Tool: submit_candidate_configuration)
-        # -------------------------------------------------------------
-        logger.info("[Deep Agent] [STAGE 4: SUBMISSION] Invoking tool: submit_candidate_configuration")
+        logger.info("[Deep Agent ReAct] [STAGE 4: SUBMISSION] Invoking tool: submit_candidate_configuration")
         submit_res = await self.execute_tool("submit_candidate_configuration", {
             "draft_id": "prompt_draft",
             "selector_map": candidate_selectors,
             "rationale": rationale,
             "evidence_refs": [evidence_ref] if evidence_ref else [],
         })
-        logger.info("[Deep Agent] [STAGE 4: SUBMITTED] Candidate accepted by tool harness: %s", submit_res.get("accepted", True))
-        logger.info("[Deep Agent] [COMPLETE] Deep Agent synthesis completed successfully.")
+        logger.info("[Deep Agent ReAct] [STAGE 4: SUBMITTED] Candidate accepted by tool harness: %s", submit_res.get("accepted", True))
+        logger.info("[Deep Agent ReAct] [COMPLETE] ReAct synthesis completed in %d turns. Verified: %s", turn, is_verified)
         logger.info("================================================================================")
 
         return {
@@ -451,4 +463,6 @@ class DeepAgentsHarness:
             "selectors": candidate_selectors,
             "rationale": rationale,
             "evidence_ref": evidence_ref,
+            "verified": is_verified,
+            "react_turns": turn,
         }

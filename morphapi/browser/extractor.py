@@ -133,6 +133,8 @@ class BrowserExtractor:
         """
         start_time = time.monotonic()
         try:
+            from morphapi.browser.source_policy import source_policy_service
+            await source_policy_service.enforce_policy(target_url)
             async with self.manager.new_page_session(target_url=target_url) as page:
                 await self.manager.navigate_safely(page, target_url)
                 return await self.extract_from_page(

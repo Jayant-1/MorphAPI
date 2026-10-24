@@ -23,6 +23,7 @@ logger = logging.getLogger("morphapi.inspector")
 STRIP_TAGS = {
     "script", "style", "noscript", "svg", "iframe", "canvas",
     "audio", "video", "source", "track", "map", "object", "embed",
+    "nav", "aside", "footer",
 }
 
 PRESERVE_ATTRS = {
@@ -31,7 +32,7 @@ PRESERVE_ATTRS = {
 }
 
 
-def prune_dom(html_content: str, max_chars: int = 50000) -> str:
+def prune_dom(html_content: str, max_chars: int = 60000) -> str:
     """
     Prunes HTML document to semantic structural skeleton.
     Removes script, style, SVG, base64 blobs, comments, and empty wrappers.
@@ -51,6 +52,15 @@ def prune_dom(html_content: str, max_chars: int = 50000) -> str:
         for elem in soup.find_all(tag_name):
             elem.decompose()
 
+    # 2b. Decompose navigation chrome containers and boilerplate UI
+    for elem in soup.find_all(True):
+        if elem.name not in ("html", "body", "main") and elem.attrs and elem.parent:
+            cls_lower = [c.lower() for c in (elem.get("class") or [])]
+            id_lower = str(elem.get("id") or "").lower()
+            if any(k in id_lower for k in ["sidebar", "mw-navigation", "vector-header", "vector-page-toolbar"]) or \
+               any(k in c for c in cls_lower for k in ["sidebar", "mw-navigation", "vector-page-toolbar", "mw-portlet", "vector-dropdown", "vector-toc", "breadcrumb", "breadcrumbs", "cookie-banner"]):
+                elem.decompose()
+
     # 3. Strip non-essential attributes
     for elem in soup.find_all(True):
         attrs = dict(elem.attrs)
@@ -66,8 +76,9 @@ def prune_dom(html_content: str, max_chars: int = 50000) -> str:
                 new_attrs[k] = v
         elem.attrs = new_attrs
 
-    # 4. Convert to string and collapse multiple spaces/newlines
-    raw_pruned = str(soup)
+    # 4. Convert to string focusing on primary data content if present
+    content_root = soup.find(["main", "article"]) or soup.find(id="content") or soup
+    raw_pruned = str(content_root)
     collapsed = re.sub(r"[ \t]+", " ", raw_pruned)
     collapsed = re.sub(r"\n\s*\n+", "\n", collapsed).strip()
 

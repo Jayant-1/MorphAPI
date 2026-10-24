@@ -15,9 +15,10 @@ from morphapi.browser.page_inspector import PageInspector, EvidenceStore, prune_
 from morphapi.browser.selector_tester import SelectorTester
 from morphapi.browser.extractor import BrowserExtractor
 from morphapi.browser.url_policy import UrlPolicyService, validate_selector_safety
+from morphapi.browser.source_policy import SourcePolicyService, source_policy_service
 from morphapi.services.validation_service import ValidationService
 from morphapi.schemas.contracts import FieldEvidence, SelectorPatch
-from morphapi.schemas.errors import FailureCode
+from morphapi.schemas.errors import FailureCode, SourcePolicyBlockedError
 
 logger = logging.getLogger("morphapi.agent_tools")
 
@@ -86,12 +87,14 @@ class AgentToolRegistry:
         validation_service: ValidationService | None = None,
         evidence_store: EvidenceStore | None = None,
         url_policy: UrlPolicyService | None = None,
+        source_policy: SourcePolicyService | None = None,
         get_status_fn: Callable[[str], Coroutine[Any, Any, dict[str, Any]]] | None = None,
         get_failure_fn: Callable[[str], Coroutine[Any, Any, dict[str, Any]]] | None = None,
         get_schema_fn: Callable[[str], Coroutine[Any, Any, dict[str, str]]] | None = None,
     ):
         self.evidence_store = evidence_store or EvidenceStore()
         self.url_policy = url_policy or UrlPolicyService()
+        self.source_policy = source_policy or source_policy_service
         self.browser_manager = browser_manager or PlaywrightManager(url_policy=self.url_policy)
         self.page_inspector = page_inspector or PageInspector(evidence_store=self.evidence_store)
         self.selector_tester = selector_tester or SelectorTester()
@@ -110,6 +113,7 @@ class AgentToolRegistry:
     async def inspect_website(self, url: str, scope_id: str | None = None) -> dict[str, Any]:
         """Inspects policy-approved website and returns evidence reference and DOM summary."""
         self.url_policy.enforce_url_policy(url)
+        await self.source_policy.enforce_policy(url)
         async with self.browser_manager.new_page_session(target_url=url) as page:
             await self.browser_manager.navigate_safely(page, url)
             result = await self.page_inspector.inspect(page, endpoint_id=scope_id or "default")
@@ -133,6 +137,7 @@ class AgentToolRegistry:
         # Otherwise inspect live if page_ref is a URL
         if page_ref.startswith("http://") or page_ref.startswith("https://"):
             self.url_policy.enforce_url_policy(page_ref)
+            await self.source_policy.enforce_policy(page_ref)
             async with self.browser_manager.new_page_session(target_url=page_ref) as page:
                 await self.browser_manager.navigate_safely(page, page_ref)
                 context = await self.page_inspector.inspect_element_context(page, region_hint=region_hint)
@@ -152,6 +157,7 @@ class AgentToolRegistry:
                 return {"error": f"Unable to resolve target URL from page_ref: {page_ref}"}
 
         self.url_policy.enforce_url_policy(target_url)
+        await self.source_policy.enforce_policy(target_url)
         async with self.browser_manager.new_page_session(target_url=target_url) as page:
             await self.browser_manager.navigate_safely(page, target_url)
             evidences = await self.selector_tester.test_all_selectors(page, candidates)
@@ -171,6 +177,8 @@ class AgentToolRegistry:
             else:
                 return {"error": f"Unable to resolve target URL from page_ref: {page_ref}"}
 
+        self.url_policy.enforce_url_policy(target_url)
+        await self.source_policy.enforce_policy(target_url)
         # Build schema mock from selector_map
         schema = {k: "str" for k in selector_map.keys()}
         res = await self.browser_extractor.extract("sample_check", target_url, schema, selector_map)

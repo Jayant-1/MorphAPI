@@ -3,7 +3,7 @@ MorphAPI Endpoint Lifecycle Routes
 Full CRUD, candidate submission, deterministic verification, atomic activation, and rollback.
 """
 
-from fastapi import APIRouter, Header, status
+from fastapi import APIRouter, Header, Response, status
 from morphapi.schemas.endpoint import (
     CandidateSubmitRequest,
     CandidateVerifyRequest,
@@ -189,15 +189,19 @@ class GenerateEndpointPromptRequest(BaseModel):
 @router.post("/generate", status_code=status.HTTP_201_CREATED)
 async def generate_endpoint_from_prompt(
     payload: GenerateEndpointPromptRequest,
+    response: Response,
     x_tenant_id: str | None = Header(default="default_tenant", alias="X-Tenant-ID"),
 ):
     """
     Creates, discovers, verifies, and activates a Web-to-API endpoint from a natural language prompt.
     Returns the endpoint URL and API key ready for immediate extraction querying.
     """
-    return await endpoint_service.generate_endpoint_from_prompt(
+    result = await endpoint_service.generate_endpoint_from_prompt(
         prompt=payload.prompt,
         target_url=payload.target_url,
         name=payload.name,
         tenant_id=x_tenant_id or "default_tenant",
     )
+    if isinstance(result, dict) and result.get("status") == "BLOCKED":
+        response.status_code = status.HTTP_403_FORBIDDEN
+    return result

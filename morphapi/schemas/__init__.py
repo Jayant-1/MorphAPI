@@ -6,7 +6,9 @@ from morphapi.schemas.contracts import (
     EndpointRegisterRequest,
     ExecutionPath,
     FieldEvidence,
+    PolicyOutcome,
     SelectorPatch,
+    SourcePolicyDecision,
     ValidationResult,
     ExtractionResult,
 )
@@ -30,6 +32,7 @@ from morphapi.schemas.errors import (
     MorphApiError,
     NIMProviderError,
     SchemaValidationError,
+    SourcePolicyBlockedError,
     SsrfSecurityError,
 )
 from morphapi.schemas.extraction import (

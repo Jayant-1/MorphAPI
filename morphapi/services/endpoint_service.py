@@ -459,8 +459,55 @@ class EndpointService:
                 "curl_command": f"curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/v1/extract/{existing['slug']}",
                 "schema_definition": existing["schema_definition"],
                 "sample_data": sample_items[:5],
-                "message": "Endpoint is verified and active. You can query the endpoint to get the 5 doc links.",
+                "message": f"Endpoint '{existing['slug']}' is verified and active. You can query the endpoint at /api/v1/extract/{existing['slug']} to extract live data.",
             }
+
+        # Stage 0: MorphAPI Responsible Access Guard (Source Policy Assessment)
+        from morphapi.browser.source_policy import source_policy_service
+        from morphapi.schemas.contracts import PolicyOutcome
+        import uuid
+
+        correlation_id = str(uuid.uuid4())
+        policy_decision = await source_policy_service.evaluate_url(url)
+        logger.info("[Access Guard] Evaluated source access policy for '%s': %s (reason: %s)", url, policy_decision.outcome, policy_decision.reason)
+
+        if policy_decision.outcome == PolicyOutcome.BLOCK:
+            await self.auditor.record_event(
+                correlation_id=correlation_id,
+                actor="responsible_access_guard",
+                action=AuditEventType.POLICY_BLOCKED,
+                target_type="url",
+                target_id=url,
+                details=policy_decision.model_dump(),
+                tenant_id=tenant_id,
+            )
+            return {
+                "status": "BLOCKED",
+                "outcome": "block",
+                "target_url": url,
+                "reason": policy_decision.reason,
+                "policy_decision": policy_decision.model_dump(),
+                "agent_explanation": (
+                    f"The requested path is disallowed by the source website's robots.txt rules for crawler identity. "
+                    f"MorphAPI Responsible Access Guard has blocked automated browser extraction before launching tools. "
+                    f"I can help you extract from an alternative permitted source or use an authorized dataset."
+                ),
+                "suggested_actions": [
+                    "Provide an alternative permitted source URL",
+                    "Register documented source owner authorization for review",
+                ],
+            }
+
+        # Record permitted / review audit event
+        await self.auditor.record_event(
+            correlation_id=correlation_id,
+            actor="responsible_access_guard",
+            action=AuditEventType.POLICY_EVALUATED,
+            target_type="url",
+            target_id=url,
+            details=policy_decision.model_dump(),
+            tenant_id=tenant_id,
+        )
 
         # Invoke Deep Agent Harness to inspect the website, reason over prompt, and discover candidate selectors
         agent_synthesis = await self.builder_agent.synthesize_from_prompt(
@@ -552,7 +599,7 @@ class EndpointService:
             "curl_command": f"curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/v1/extract/{slug}",
             "schema_definition": schema,
             "sample_data": sample_items[:5],
-            "message": "Endpoint is verified and active. You can query the endpoint to get the 5 doc links.",
+            "message": f"Endpoint '{slug}' is verified and active. You can query the endpoint at /api/v1/extract/{slug} to extract live data.",
         }
 
 
