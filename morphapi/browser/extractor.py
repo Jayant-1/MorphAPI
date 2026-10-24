@@ -70,7 +70,12 @@ class BrowserExtractor:
                 )
 
             # 3. Determine if dataset is a list of rows or a single record
-            counts = [ev.matched_count for ev in evidences]
+            schema_fields = set(schema_definition.keys())
+            data_evidences = [ev for ev in evidences if ev.field_name in schema_fields]
+            if not data_evidences:
+                data_evidences = [ev for ev in evidences if ev.field_name.lower() not in ("record", "container", "card", "row", "item")]
+
+            counts = [ev.matched_count for ev in data_evidences]
             is_list = len(counts) > 0 and all(c > 1 for c in counts)
 
             extracted_data: Any = None
@@ -80,7 +85,7 @@ class BrowserExtractor:
                 dataset = []
                 for row_idx in range(min_rows):
                     row: dict[str, Any] = {}
-                    for ev in evidences:
+                    for ev in data_evidences:
                         val = ev.sample_values[row_idx] if row_idx < len(ev.sample_values) else None
                         row[ev.field_name] = val
                     dataset.append(row)
@@ -88,7 +93,7 @@ class BrowserExtractor:
             else:
                 # Single record
                 record: dict[str, Any] = {}
-                for ev in evidences:
+                for ev in data_evidences:
                     val = ev.sample_values[0] if ev.sample_values else None
                     record[ev.field_name] = val
                 extracted_data = record

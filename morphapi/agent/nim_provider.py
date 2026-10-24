@@ -201,19 +201,34 @@ class NvidiaNimProvider:
         )
 
     def _extract_json(self, raw_text: str) -> dict[str, Any]:
-        """Extracts JSON object from model output."""
+        """Extracts JSON object from model output, handling reasoning and fences."""
         text = raw_text.strip()
-        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if fence_match:
-            candidate = fence_match.group(1)
-        else:
-            brace_match = re.search(r"\{.*\}", text, re.DOTALL)
-            candidate = brace_match.group(0) if brace_match else text
+        for fence in re.finditer(r"```(?:json)?\s*([\s\S]*?)\s*```", text):
+            try:
+                val = json.loads(fence.group(1).strip())
+                if isinstance(val, dict):
+                    return val
+            except Exception:
+                pass
 
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError as e:
-            raise NIMProviderError(
-                FailureCode.NIM_INFERENCE_ERROR,
-                f"Failed to parse JSON from model response: {e}. Raw content: {text[:200]}",
-            ) from e
+        decoder = json.JSONDecoder()
+        indices = [m.start() for m in re.finditer(r"\{", text)]
+        candidates = []
+        for idx in indices:
+            try:
+                obj, _ = decoder.raw_decode(text[idx:])
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+            except Exception:
+                continue
+
+        for c in reversed(candidates):
+            if any(k in c for k in ("selectors", "new_selectors", "schema_definition", "name")):
+                return c
+        if candidates:
+            return max(candidates, key=lambda d: len(d))
+
+        raise NIMProviderError(
+            FailureCode.NIM_INFERENCE_ERROR,
+            f"Failed to parse JSON from model response. Raw content: {text[:200]}",
+        )

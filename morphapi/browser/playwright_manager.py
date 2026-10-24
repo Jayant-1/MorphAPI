@@ -46,19 +46,42 @@ class PlaywrightManager:
         self._lock = asyncio.Lock()
 
     async def _ensure_browser(self) -> Browser:
+        """Initializes Playwright and Chromium instance if not already running."""
         async with self._lock:
+            if self._browser is not None and not self._browser.is_connected():
+                try:
+                    await self._browser.close()
+                except Exception:
+                    pass
+                self._browser = None
+                if self._playwright is not None:
+                    try:
+                        await self._playwright.stop()
+                    except Exception:
+                        pass
+                    self._playwright = None
+
             if self._playwright is None:
                 self._playwright = await async_playwright().start()
             if self._browser is None or not self._browser.is_connected():
-                self._browser = await self._playwright.chromium.launch(
-                    headless=self.headless,
-                    args=[
-                        "--disable-gpu",
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-setuid-sandbox",
-                    ],
-                )
+                try:
+                    self._browser = await self._playwright.chromium.launch(
+                        headless=self.headless,
+                        args=[
+                            "--disable-gpu",
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-setuid-sandbox",
+                        ],
+                    )
+                except Exception:
+                    if self._playwright is not None:
+                        try:
+                            await self._playwright.stop()
+                        except Exception:
+                            pass
+                        self._playwright = None
+                    raise
             return self._browser
 
     @asynccontextmanager
@@ -81,23 +104,42 @@ class PlaywrightManager:
         page.set_default_timeout(self.timeout_ms)
         page.set_default_navigation_timeout(self.navigation_timeout_ms)
 
+        is_closing = False
+
         # Route-level interception to inspect redirect target locations
         async def handle_route(route):
-            req = route.request
-            url = req.url
-            # Verify URL policy on sub-requests and redirects
-            if req.is_navigation_request():
-                is_safe, reason = self.url_policy.validate_url(url)
-                if not is_safe:
-                    logger.warning("Blocked outbound request to unsafe URL '%s': %s", url, reason)
-                    await route.abort("blockedbyclient")
-                    return
-            await route.continue_()
+            if is_closing:
+                return
+            try:
+                req = route.request
+                url = req.url
+                # Verify URL policy on sub-requests and redirects
+                if req.is_navigation_request():
+                    is_safe, reason = self.url_policy.validate_url(url)
+                    if not is_safe:
+                        logger.warning("Blocked outbound request to unsafe URL '%s': %s", url, reason)
+                        await route.abort("blockedbyclient")
+                        return
+                if not is_closing and not page.is_closed():
+                    await route.continue_()
+            except Exception:
+                # Suppress TargetClosedError if page/context closed while routing
+                pass
 
         try:
             await page.route("**/*", handle_route)
             yield page
         finally:
+            is_closing = True
+            try:
+                await page.unroute("**/*")
+            except Exception:
+                pass
+            try:
+                if not page.is_closed():
+                    await page.close()
+            except Exception:
+                pass
             try:
                 await context.close()
             except Exception as e:
@@ -120,22 +162,13 @@ class PlaywrightManager:
                     FailureCode.BROWSER_NAVIGATION_ERROR,
                     f"Website returned HTTP error {response.status} for '{url}'",
                 )
-            # Brief pause to allow client-side JavaScript / SPAs to mount data
+            # Allow client-side JavaScript / SPAs to mount data
             try:
-                await page.wait_for_load_state("load", timeout=3000)
+                await page.wait_for_load_state("networkidle", timeout=6000)
             except Exception:
                 pass
-            if response is None:
-                raise BrowserExecutionError(
-                    FailureCode.BROWSER_NAVIGATION_ERROR,
-                    f"Navigation returned no response for '{url}'",
-                )
-            # Check HTTP status
-            if response.status >= 400:
-                raise BrowserExecutionError(
-                    FailureCode.BROWSER_NAVIGATION_ERROR,
-                    f"Website returned HTTP error {response.status} for '{url}'",
-                )
+            # Brief settling pause
+            await asyncio.sleep(1.0)
         except PlaywrightTimeoutError as te:
             raise BrowserExecutionError(
                 FailureCode.BROWSER_TIMEOUT,

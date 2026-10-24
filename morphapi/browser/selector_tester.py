@@ -32,7 +32,25 @@ class SelectorTester:
         """
         Executes a selector against the live page, extracting match counts and sample values.
         """
-        is_safe, error_msg = validate_selector_safety(selector)
+        # Normalize pseudo-attributes (e.g. ::attr(href), ::text, /@href, /text())
+        clean_sel = selector.strip()
+        extract_attr: str | None = None
+        if "::attr(" in clean_sel:
+            import re
+            m = re.search(r"::attr\(([^)]+)\)", clean_sel)
+            if m:
+                extract_attr = m.group(1).strip()
+            clean_sel = re.sub(r"::attr\([^)]+\)", "", clean_sel).strip()
+        elif clean_sel.endswith("::text"):
+            clean_sel = clean_sel[:-6].strip()
+        elif "/@" in clean_sel:
+            parts = clean_sel.split("/@")
+            clean_sel = parts[0].strip()
+            extract_attr = parts[1].strip()
+        elif clean_sel.endswith("/text()"):
+            clean_sel = clean_sel[:-7].strip()
+
+        is_safe, error_msg = validate_selector_safety(clean_sel)
         if not is_safe:
             return FieldEvidence(
                 field_name=field_name,
@@ -43,7 +61,7 @@ class SelectorTester:
             )
 
         try:
-            locator = page.locator(selector)
+            locator = page.locator(clean_sel)
             count = await locator.count()
 
             if count == 0:
@@ -70,26 +88,30 @@ class SelectorTester:
                         is_visible = await elem.is_visible()
                         tag_name = curr_tag
 
-                    # If field expects a URL or element is an anchor/source, extract fully qualified link
-                    is_link_field = any(k in field_name.lower() for k in ("link", "url", "href", "doc", "file", "download", "pdf")) or curr_tag == "a" or selector.strip().endswith("a")
+                    if extract_attr:
+                        val = await elem.get_attribute(extract_attr)
+                        text = val.strip() if val else ""
+                    else:
+                        # If field expects a URL or element is an anchor/source, extract fully qualified link
+                        is_link_field = any(k in field_name.lower() for k in ("link", "url", "href", "doc", "file", "download", "pdf")) or curr_tag == "a" or clean_sel.strip().endswith("a")
 
-                    if is_link_field and curr_tag == "a":
-                        href = await elem.evaluate("el => el.href || el.getAttribute('href') || ''")
-                        text = href.strip() if href else ""
-                        if not text:
+                        if is_link_field and curr_tag == "a":
+                            href = await elem.evaluate("el => el.href || el.getAttribute('href') || ''")
+                            text = href.strip() if href else ""
+                            if not text:
+                                raw_text = await elem.inner_text()
+                                text = raw_text.strip() if raw_text else ""
+                        else:
                             raw_text = await elem.inner_text()
                             text = raw_text.strip() if raw_text else ""
-                    else:
-                        raw_text = await elem.inner_text()
-                        text = raw_text.strip() if raw_text else ""
-                        if not text:
-                            # Fallback to attribute checks (value, href, src)
-                            text = (
-                                await elem.get_attribute("value")
-                                or await elem.get_attribute("href")
-                                or await elem.get_attribute("src")
-                                or ""
-                            ).strip()
+                            if not text:
+                                # Fallback to attribute checks (value, href, src)
+                                text = (
+                                    await elem.get_attribute("value")
+                                    or await elem.get_attribute("href")
+                                    or await elem.get_attribute("src")
+                                    or ""
+                                ).strip()
 
                     samples.append(text)
                 except Exception as ex:

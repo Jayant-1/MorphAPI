@@ -172,17 +172,17 @@ class GenerateEndpointPromptRequest(BaseModel):
     prompt: str = Field(
         ...,
         description="Natural language prompt describing the web API to create",
-        examples=["Extract top 5 government resolution document links from https://sarthi.maharashtra.gov.in/en/government-resolution"],
+        examples=["Extract item names, prices, and links from https://example.com/products"],
     )
     target_url: str | None = Field(
         default=None,
         description="Optional target URL (if omitted, extracted from prompt)",
-        examples=["https://sarthi.maharashtra.gov.in/en/government-resolution"],
+        examples=["https://example.com/products"],
     )
     name: str | None = Field(
         default=None,
         description="Optional display name for the endpoint",
-        examples=["Sarthi Government Resolutions"],
+        examples=["Product Catalog API"],
     )
     user_id: str | None = Field(
         default=None,

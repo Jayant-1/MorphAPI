@@ -269,8 +269,8 @@ class DeepAgentsHarness:
 
         # Extract focused DOM sample for the model
         soup_page = BeautifulSoup(pruned_dom, "html.parser")
-        main_content = soup_page.find(["main", "article", "table"]) or soup_page.find(id="content") or soup_page
-        dom_sample = str(main_content)[:25000]
+        main_content = soup_page.find(["main", "article"]) or soup_page.find(id="content") or soup_page.find("body") or soup_page
+        dom_sample = str(main_content)[:35000]
 
         # -------------------------------------------------------------
         # ReAct Loop: Thought -> Action -> Observation -> Reflection
@@ -282,13 +282,14 @@ class DeepAgentsHarness:
 
         system_msg = (
             "You are an expert API Architect and browser automation engineer for MorphAPI. "
+            "Keep internal reasoning brief and concise. Focus directly on outputting the valid JSON API contract. "
             "Analyze the user request and rendered DOM to dynamically design the full API contract. "
             "Decide the optimal API inputs, outputs, URL query/path parameter mapping, and CSS selectors. "
-            "Identify repeating rows, cards, or items on the page. "
-            "For tables, account for row headers (<th scope='row'>) as well as data cells (<td>). "
+            "Identify repeating records, cards, or listing items on the page that correspond to the data requested by the user. "
+            "Extract only the main data items (e.g. startup companies, articles, products, rows), NOT website navigation menus, footer links, or search filters. "
             "Return ONLY valid JSON with keys:\n"
             "  \"name\": string display name or slug for the API,\n"
-            "  \"inputs\": dictionary of input parameters that users can supply to customize queries (e.g. {\"batch\": {\"type\": \"str\", \"description\": \"Batch filter\", \"default\": \"W25\"}}),\n"
+            "  \"inputs\": dictionary of input parameters that users can supply to customize queries (e.g. {\"batch\": {\"type\": \"str\", \"description\": \"Batch filter\", \"default\": \"\"}}),\n"
             "  \"target_url_template\": target URL with placeholders like {param_name} if inputs customize the URL, or the base URL,\n"
             "  \"schema_definition\": dictionary of output field name to type (\"str\", \"int\", \"float\", \"bool\"),\n"
             "  \"selectors\": dictionary of output field name to valid CSS selector matching each record's field,\n"
@@ -319,9 +320,10 @@ class DeepAgentsHarness:
                 completion = await self.provider.create_chat_completion(
                     messages=conversation_messages,
                     temperature=0.1,
-                    max_tokens=1024,
+                    max_tokens=4096,
                 )
-                raw_text = completion.choices[0].message.content or ""
+                msg = completion.choices[0].message
+                raw_text = msg.content or getattr(msg, "reasoning_content", "") or ""
                 logger.info("[Deep Agent ReAct] [TURN %d] [MODEL RESPONSE] Received (%d chars)", turn, len(raw_text))
 
                 parsed = self.provider._extract_json(raw_text)
@@ -341,75 +343,19 @@ class DeepAgentsHarness:
             except Exception as nim_err:
                 logger.warning("[Deep Agent ReAct] [TURN %d] NIM call encountered: %s", turn, nim_err)
 
-            # If NIM was unable to produce valid selectors on turn 1, use Semantic DOM Analyzer
-            if not nim_turn_success and turn == 1:
-                logger.info("[Deep Agent ReAct] [STAGE 2: GENERIC DOM ANALYZER] Dynamically analyzing structural layout...")
-                tables = soup_page.find_all("table")
-                if tables:
-                    t = tables[0]
-                    rows = t.find_all("tr")
-                    th_elements = t.find_all("th")
-                    headers = []
-                    if th_elements:
-                        headers = [re.sub(r"[^a-zA-Z0-9_]", "_", th.get_text(strip=True).lower()).strip("_") for th in th_elements]
-                    elif len(rows) > 1:
-                        headers = [re.sub(r"[^a-zA-Z0-9_]", "_", td.get_text(strip=True).lower()).strip("_") for td in rows[0].find_all(["td", "th"])]
-
-                    data_row = rows[1] if len(rows) > 1 else (rows[0] if rows else None)
-                    data_cells = data_row.find_all(["td", "th"]) if data_row else []
-                    num_cols = len(data_cells) or len(headers) or 1
-
-                    schema_def = {}
-                    candidate_selectors = {}
-                    for idx in range(1, num_cols + 1):
-                        header_cand = headers[idx - 1] if idx - 1 < len(headers) and headers[idx - 1] else ""
-                        cell = data_cells[idx - 1] if idx - 1 < len(data_cells) else None
-                        cell_text = cell.get_text(strip=True) if cell else ""
-                        has_anchor = bool(cell and cell.find("a"))
-
-                        if not header_cand:
-                            header_cand = "link" if has_anchor else f"field_{idx}"
-
-                        final_key = header_cand
-                        k_suffix = 1
-                        while final_key in schema_def:
-                            final_key = f"{header_cand}_{k_suffix}"
-                            k_suffix += 1
-
-                        if has_anchor:
-                            schema_def[final_key] = "str"
-                            candidate_selectors[final_key] = f"table tr td:nth-child({idx}) a, table tr th a"
-                        else:
-                            schema_def[final_key] = "str"
-                            candidate_selectors[final_key] = f"table tr td:nth-child({idx}), table tr th:nth-child({idx})"
-
-                    rationale = f"Discovered dynamic tabular layout with {num_cols} structural columns"
-                else:
-                    cards = soup_page.find_all("article") or soup_page.find_all("li") or soup_page.select("[role='article'], section")
-                    if cards:
-                        sample_card = cards[0]
-                        schema_def = {}
-                        candidate_selectors = {}
-                        h = sample_card.find(["h1", "h2", "h3", "h4", "h5", "h6", "strong", "b"])
-                        if h:
-                            schema_def["title"] = "str"
-                            candidate_selectors["title"] = h.name
-                        a = sample_card.find("a")
-                        if a:
-                            schema_def["link"] = "str"
-                            candidate_selectors["link"] = "a"
-                        p = sample_card.find(["p", "span"])
-                        if p and p != h:
-                            schema_def["detail"] = "str"
-                            candidate_selectors["detail"] = p.name
-                        if not schema_def:
-                            schema_def = {"title": "str", "link": "str"}
-                            candidate_selectors = {"title": "h1, h2, h3, a", "link": "a"}
-                        rationale = f"Discovered repeating container blocks with {len(schema_def)} structural fields"
-                    else:
-                        schema_def = {"title": "str", "link": "str"}
-                        candidate_selectors = {"title": "h1, h2, h3, a", "link": "a"}
-                        rationale = "Extracted prominent structural headings and hyperlink elements"
+            # If NIM was unable to produce valid selectors on this turn, let the ReAct loop continue to the next turn
+            if not nim_turn_success:
+                logger.warning("[Deep Agent ReAct] [TURN %d] Model did not propose a valid schema/selector dictionary. Continuing ReAct iteration...", turn)
+                if turn < max_turns:
+                    conversation_messages.append({
+                        "role": "user",
+                        "content": (
+                            "Please review the rendered DOM structure carefully. "
+                            "Output ONLY a valid JSON object with keys: 'name', 'inputs', 'target_url_template', "
+                            "'schema_definition', 'selectors', and 'rationale'. Do not include conversational markdown before or after the JSON."
+                        ),
+                    })
+                continue
 
             if not candidate_selectors:
                 logger.warning("[Deep Agent ReAct] [TURN %d] No candidate selectors generated.", turn)
@@ -446,30 +392,22 @@ class DeepAgentsHarness:
             else:
                 logger.warning("[Deep Agent ReAct] [TURN %d] [REFLECTION] Validation failed for fields: %s", turn, failing_fields)
 
-                # Extract context snippet of the first table row or card to help the model self-correct
                 # Extract context snippet of the repeating layout generically using HTML5 semantic elements
-                sample_snippet = ""
                 content_container = soup_page.find(["main", "article"]) or soup_page.find("body") or soup_page
-                first_tr = content_container.find("tr")
-                first_article = content_container.find("article")
-                first_li = content_container.find("li")
-
-                if first_tr:
-                    trs = first_tr.parent.find_all("tr")
-                    row = trs[1] if len(trs) > 1 else trs[0]
-                    sample_snippet = str(row)[:1000]
-                elif first_article:
-                    sample_snippet = str(first_article)[:1000]
-                elif first_li:
-                    sample_snippet = str(first_li)[:1000]
-                else:
-                    sample_snippet = str(content_container)[:1000]
+                sample_item = (
+                    content_container.find("article")
+                    or content_container.find("li")
+                    or content_container.find("tr")
+                    or content_container.find(attrs={"class": re.compile(r"item|card|row|result|company", re.I)})
+                    or content_container
+                )
+                sample_snippet = str(sample_item)[:1200]
 
                 feedback_msg = (
                     f"Observation from live browser testing:\n"
                     f"Errors:\n" + "\n".join(error_details) + "\n\n"
                     f"Sample element snippet from live page:\n{sample_snippet}\n\n"
-                    f"Reflect on why the selectors failed (check for invalid syntax, or elements inside <th> instead of <td>). "
+                    f"Reflect on why the selectors failed. Check for invalid syntax, or inspect the DOM snippet closely. "
                     f"Provide corrected CSS selectors for ALL fields in the required JSON format."
                 )
                 conversation_messages.append({"role": "user", "content": feedback_msg})

@@ -23,7 +23,7 @@ logger = logging.getLogger("morphapi.inspector")
 STRIP_TAGS = {
     "script", "style", "noscript", "svg", "iframe", "canvas",
     "audio", "video", "source", "track", "map", "object", "embed",
-    "nav", "aside", "footer",
+    "nav", "aside", "footer", "header",
 }
 
 PRESERVE_ATTRS = {

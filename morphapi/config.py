@@ -35,7 +35,7 @@ class MorphApiSettings(BaseModel):
         default_factory=lambda: os.getenv("NVIDIA_NIM_MODEL", "meta/llama-3.2-11b-vision-instruct")
     )
     nvidia_nim_timeout_seconds: float = Field(
-        default_factory=lambda: float(os.getenv("NVIDIA_NIM_TIMEOUT_SECONDS", "30.0"))
+        default_factory=lambda: float(os.getenv("NVIDIA_NIM_TIMEOUT_SECONDS", "90.0"))
     )
     nvidia_nim_max_retries: int = Field(
         default_factory=lambda: int(os.getenv("NVIDIA_NIM_MAX_RETRIES", "1"))
@@ -46,10 +46,10 @@ class MorphApiSettings(BaseModel):
         default_factory=lambda: os.getenv("PLAYWRIGHT_HEADLESS", "true").lower() in ("true", "1", "yes")
     )
     playwright_timeout_ms: int = Field(
-        default_factory=lambda: int(os.getenv("PLAYWRIGHT_TIMEOUT_MS", "15000"))
+        default_factory=lambda: int(os.getenv("PLAYWRIGHT_TIMEOUT_MS", "25000"))
     )
     playwright_navigation_timeout_ms: int = Field(
-        default_factory=lambda: int(os.getenv("PLAYWRIGHT_NAVIGATION_TIMEOUT_MS", "20000"))
+        default_factory=lambda: int(os.getenv("PLAYWRIGHT_NAVIGATION_TIMEOUT_MS", "30000"))
     )
 
     # Security & URL Policy
@@ -65,10 +65,10 @@ class MorphApiSettings(BaseModel):
         default_factory=lambda: int(os.getenv("WORKFLOW_MAX_TOOL_CALLS", "10"))
     )
     workflow_deadline_seconds: float = Field(
-        default_factory=lambda: float(os.getenv("WORKFLOW_DEADLINE_SECONDS", "120.0"))
+        default_factory=lambda: float(os.getenv("WORKFLOW_DEADLINE_SECONDS", "180.0"))
     )
     per_tool_timeout_seconds: float = Field(
-        default_factory=lambda: float(os.getenv("PER_TOOL_TIMEOUT_SECONDS", "30.0"))
+        default_factory=lambda: float(os.getenv("PER_TOOL_TIMEOUT_SECONDS", "45.0"))
     )
 
     # Checkpoint and Evidence Paths
