@@ -28,7 +28,10 @@ from morphapi.schemas.endpoint import (
 from morphapi.schemas.errors import FailureCode, MorphApiError
 from morphapi.services.audit_service import AuditService, audit_service
 from morphapi.services.validation_service import ValidationService
-from morphapi.agent.builder_agent import DeepAgentsHarness
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from morphapi.agent.builder_agent import DeepAgentsHarness
 
 
 class EndpointService:
@@ -40,7 +43,7 @@ class EndpointService:
         browser_extractor: BrowserExtractor | None = None,
         selector_tester: SelectorTester | None = None,
         auditor: AuditService | None = None,
-        builder_agent: DeepAgentsHarness | None = None,
+        builder_agent: Optional["DeepAgentsHarness"] = None,
     ):
         self.endpoint_repo = endpoint_repo or EndpointRepository()
         self.version_repo = version_repo or VersionRepository()
@@ -48,7 +51,14 @@ class EndpointService:
         self.extractor = browser_extractor or BrowserExtractor()
         self.tester = selector_tester or SelectorTester()
         self.auditor = auditor or audit_service
-        self.builder_agent = builder_agent or DeepAgentsHarness()
+        self._builder_agent = builder_agent
+
+    @property
+    def builder_agent(self):
+        if self._builder_agent is None:
+            from morphapi.agent.builder_agent import DeepAgentsHarness
+            self._builder_agent = DeepAgentsHarness()
+        return self._builder_agent
 
     async def create_endpoint_draft(
         self,
@@ -470,6 +480,12 @@ class EndpointService:
         # 1. Create Draft or reuse existing draft
         if existing:
             endpoint_id = existing["endpoint_id"]
+            await self.endpoint_repo.update_endpoint_draft(
+                endpoint_id=endpoint_id,
+                target_url=url,
+                schema_definition=schema,
+                name=discovered_name,
+            )
         else:
             draft_req = EndpointCreateRequest(
                 name=discovered_name,

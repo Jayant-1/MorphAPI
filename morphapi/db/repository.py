@@ -226,6 +226,29 @@ class EndpointRepository:
         finally:
             await conn.close()
 
+    async def update_endpoint_draft(
+        self,
+        endpoint_id: str,
+        target_url: str,
+        schema_definition: dict[str, str],
+        name: str | None = None,
+    ) -> None:
+        conn = await get_db_connection(self.db_path)
+        try:
+            if name:
+                await conn.execute(
+                    "UPDATE endpoints SET target_url = ?, schema_definition = ?, name = ?, updated_at = ? WHERE endpoint_id = ?",
+                    (target_url, json.dumps(schema_definition), name, _now(), endpoint_id),
+                )
+            else:
+                await conn.execute(
+                    "UPDATE endpoints SET target_url = ?, schema_definition = ?, updated_at = ? WHERE endpoint_id = ?",
+                    (target_url, json.dumps(schema_definition), _now(), endpoint_id),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
     async def atomic_activate_version(
         self, endpoint_id: str, version_id: str
     ) -> tuple[dict[str, Any], dict[str, Any]]:

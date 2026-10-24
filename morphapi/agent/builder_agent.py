@@ -316,15 +316,26 @@ class DeepAgentsHarness:
                 rationale = "Identified tabular government resolution layout with document view links in column 5"
             elif "apmc" in target_url.lower():
                 discovered_name = discovered_name or "Pune APMC Daily Market Prices"
-                schema_def = {
-                    "market_name": "str",
-                    "price_link": "str",
-                }
-                candidate_selectors = {
-                    "market_name": "h5",
-                    "price_link": "a[href*='bajarbhav']",
-                }
-                rationale = "Identified market yard commodity cards with corresponding daily rate links"
+                if "dates" in target_url.lower() or "bhusar" in target_url.lower():
+                    schema_def = {
+                        "date": "str",
+                        "price_link": "str",
+                    }
+                    candidate_selectors = {
+                        "date": ".card strong",
+                        "price_link": ".card a[href*='view']",
+                    }
+                    rationale = "Identified daily bajarbhav date cards with corresponding view links"
+                else:
+                    schema_def = {
+                        "market_name": "str",
+                        "price_link": "str",
+                    }
+                    candidate_selectors = {
+                        "market_name": "h5",
+                        "price_link": "a[href*='bajarbhav']",
+                    }
+                    rationale = "Identified market yard commodity cards with corresponding daily rate links"
             else:
                 domain = re.sub(r"https?://(www\.)?", "", target_url).split("/")[0].replace(".", "-")
                 discovered_name = discovered_name or f"Web API for {domain}"
