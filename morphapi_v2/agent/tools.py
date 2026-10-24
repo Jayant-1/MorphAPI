@@ -46,10 +46,18 @@ class ValidateSampleDataInput(BaseModel):
     schema_definition: dict[str, str] = Field(..., description="Target schema definition")
 
 
+class TestCustomBrowserScriptInput(BaseModel):
+    js_code: str = Field(
+        ...,
+        description="JavaScript function string executed via page.evaluate() in the Chromium sandbox. Must return an array of objects matching the schema."
+    )
+
+
 class SubmitExtractionPlanInput(BaseModel):
-    strategy: str = Field(default="hierarchical_dom", description="'hierarchical_dom' or 'intercepted_api'")
-    container_selector: str = Field(..., description="Verified container selector")
-    field_rules: dict[str, dict[str, str]] = Field(..., description="Verified field extraction rules")
+    strategy: str = Field(default="hierarchical_dom", description="'hierarchical_dom', 'intercepted_api', or 'custom_js'")
+    container_selector: str = Field(default="", description="Verified container selector (if using hierarchical_dom)")
+    field_rules: dict[str, dict[str, str]] = Field(default_factory=dict, description="Verified field extraction rules")
+    custom_js_extractor: str | None = Field(default=None, description="Custom Playwright JavaScript extraction function string if strategy is 'custom_js'")
     rationale: str = Field(..., description="Reasoning explaining why this configuration is reliable")
 
 
@@ -98,6 +106,14 @@ class AgentToolRegistryV2:
                     "name": "test_hierarchical_selectors",
                     "description": "Tests a candidate container selector and relative field selectors live in Chromium, returning match count and sample values.",
                     "parameters": TestHierarchicalSelectorsInput.model_json_schema(),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "test_custom_browser_script",
+                    "description": "Executes a custom Playwright JavaScript extraction function inside the Chromium sandbox via page.evaluate(). Essential for complex multi-row layouts (e.g. Hacker News where titles, scores, and links are in adjacent sibling rows), shadow DOM, or custom sibling traversal. Must return an array of objects matching the schema.",
+                    "parameters": TestCustomBrowserScriptInput.model_json_schema(),
                 },
             },
             {
@@ -228,6 +244,33 @@ class AgentToolRegistryV2:
                 "error": res.error_message,
             }
 
+    async def test_custom_browser_script(self, js_code: str) -> dict[str, Any]:
+        logger.info("[Tool: test_custom_browser_script] Testing custom Playwright JavaScript in browser sandbox...")
+        if not self.cached_page_url:
+            return {"error": "No target URL. Run inspect_page first."}
+
+        plan = ContainerExtractionPlan(
+            strategy="custom_js",
+            container_selector="",
+            custom_js_extractor=js_code,
+        )
+
+        async with self.session_manager.new_page_session() as page:
+            await self.session_manager.navigate_and_stabilize(page, self.cached_page_url)
+            res = await self.extractor.extract_with_plan(
+                page=page,
+                plan=plan,
+                target_schema={},
+                max_records=15,
+            )
+
+            return {
+                "success": res.success,
+                "matched_count": res.count,
+                "sample_data": res.data[:3] if res.data else [],
+                "error": res.error_message,
+            }
+
     async def validate_sample_data(
         self,
         sample_records: list[dict[str, Any]],
@@ -244,11 +287,13 @@ class AgentToolRegistryV2:
     async def submit_extraction_plan(
         self,
         strategy: str,
-        container_selector: str,
-        field_rules: dict[str, dict[str, str]],
-        rationale: str,
+        container_selector: str = "",
+        field_rules: dict[str, dict[str, str]] | None = None,
+        rationale: str = "",
+        custom_js_extractor: str | None = None,
     ) -> dict[str, Any]:
-        logger.info("[Tool: submit_extraction_plan] Submitting plan with container: '%s'", container_selector)
+        logger.info("[Tool: submit_extraction_plan] Submitting plan with strategy='%s'", strategy)
+        field_rules = field_rules or {}
         typed_rules = {
             k: RelativeFieldSelector(
                 selector=v.get("selector", "."),
@@ -261,6 +306,7 @@ class AgentToolRegistryV2:
             strategy=strategy,
             container_selector=container_selector,
             field_rules=typed_rules,
+            custom_js_extractor=custom_js_extractor,
             rationale=rationale,
             discovery_method="deep_agent_tools",
             confidence_score=0.95,

@@ -4,6 +4,7 @@ User Prompt & Intent Models for MorphAPI V2
 
 from typing import Any
 from pydantic import BaseModel, Field
+from morphapi_v2.schemas.models import EndpointContract, ParameterSpec, FieldTypeSpec
 
 
 class ParameterDefinition(BaseModel):
@@ -32,5 +33,7 @@ class ParsedIntent(BaseModel):
     inputs: dict[str, ParameterDefinition] = Field(default_factory=dict)
     schema_definition: dict[str, str] = Field(default_factory=dict)
     field_definitions: list[FieldDefinition] = Field(default_factory=list)
+    response_shape: str = "list"
+    contract: EndpointContract | None = None
     raw_prompt: str = ""
     rationale: str = ""

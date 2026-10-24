@@ -19,6 +19,8 @@ from morphapi_v2.browser.network_sniffer import NetworkSniffer
 from morphapi_v2.browser.hierarchical_extractor import hierarchical_extractor
 from morphapi_v2.workflows.graph import morphapi_workflow_v2
 from morphapi_v2.db.repository import endpoint_repo_v2
+from morphapi_v2.engine.type_coercer import type_coercer
+from morphapi_v2.agent.deep_agent import deep_agent_v2
 
 logger = logging.getLogger("morphapi_v2.gateway")
 
@@ -36,12 +38,17 @@ class MorphGatewayEngineV2:
         START -> parse_intent -> inspect_and_sniff -> propose_plan (Deep Agent LLM) ->
         test_extraction -> validate_results -> (if needed: reflect_and_heal) -> activate_endpoint -> END
         """
-        logger.info("[GatewayEngineV2] Initiating LangGraph StateGraph synthesis for: '%s'", request.prompt)
+        prompt = request.prompt or ""
+        target_url = request.target_url or getattr(request, "url", None) or ""
+        if not prompt and target_url:
+            prompt = f"Create an API extracting title, description, and link from {target_url}"
+
+        logger.info("[GatewayEngineV2] Initiating LangGraph StateGraph synthesis for: '%s'", prompt)
         thread_id = f"thread_v2_{uuid.uuid4().hex[:12]}"
 
         initial_state = {
-            "prompt": request.prompt,
-            "target_url": request.target_url or "",
+            "prompt": prompt,
+            "target_url": target_url,
             "name": request.name,
             "user_id": request.user_id,
             "intent": {},
@@ -118,16 +125,88 @@ class MorphGatewayEngineV2:
                         for target_k, mapped_k in plan.intercepted_field_map.items():
                             row[target_k] = rec.get(mapped_k)
                         results.append(row)
-                    return results
+                    raw_results = results
+                else:
+                    raw_results = []
+            else:
+                # Hierarchical DOM or Custom Playwright JS extraction
+                extract_res = await self.extractor.extract_with_plan(
+                    page=page,
+                    plan=plan,
+                    target_schema=schema,
+                    max_records=50,
+                    runtime_params=params,
+                )
+                raw_results = extract_res.data or []
 
-            # Hierarchical DOM extraction
-            extract_res = await self.extractor.extract_with_plan(
-                page=page,
-                plan=plan,
-                target_schema=schema,
-                max_records=50,
+                # Auto-healing trigger if target website mutated and extraction returned 0 records
+                if (not raw_results or len(raw_results) == 0) and plan.strategy == "hierarchical_dom":
+                    logger.warning(
+                        "[GatewayEngineV2] Extraction returned 0 records on active endpoint '%s' (Target site UI may have mutated). Triggering autonomous self-healing...",
+                        slug,
+                    )
+                    healed_plan = await self.heal_endpoint(
+                        user_id=user_id,
+                        slug=slug,
+                        target_url=resolved_url,
+                        schema=schema,
+                        previous_error=f"Container selector '{plan.container_selector}' matched 0 elements after website redesign",
+                    )
+                    if healed_plan:
+                        # Re-extract immediately with the healed plan
+                        retry_res = await self.extractor.extract_with_plan(
+                            page=page,
+                            plan=healed_plan,
+                            target_schema=schema,
+                            max_records=50,
+                            runtime_params=params,
+                        )
+                        raw_results = retry_res.data or []
+                        plan = healed_plan
+
+            # 3. Shape Response according to Endpoint Contract
+            response_shape = "list"
+            if plan.contract and plan.contract.response_shape:
+                response_shape = plan.contract.response_shape
+
+            return type_coercer.shape_response(
+                data=raw_results,
+                response_shape=response_shape,
+                query_params=params,
             )
-            return extract_res.data or []
+
+    async def heal_endpoint(
+        self,
+        user_id: str,
+        slug: str,
+        target_url: str,
+        schema: dict[str, str],
+        previous_error: str,
+    ) -> ContainerExtractionPlan | None:
+        logger.info("[GatewayEngineV2] [SELF-HEALING] Investigating mutated page at '%s'...", target_url)
+        healed_plan = await deep_agent_v2.autonomous_investigation(
+            target_url=target_url,
+            target_schema=schema,
+            failure_context=previous_error,
+            force_custom_script=True,
+        )
+
+        endpoint = await self.repo.get_endpoint(user_id=user_id, slug=slug)
+        if endpoint:
+            await self.repo.save_endpoint(
+                endpoint_id=endpoint["endpoint_id"],
+                user_id=user_id,
+                api_name=endpoint["api_name"],
+                slug=slug,
+                target_url=target_url,
+                schema_definition=endpoint["schema_definition"],
+                inputs=endpoint["inputs"],
+                plan=healed_plan.model_dump(),
+                sample_data=endpoint["sample_data"],
+                api_key=endpoint["api_key"],
+            )
+            logger.info("[GatewayEngineV2] [SELF-HEALING] Endpoint '%s' successfully healed and updated with strategy '%s'!", slug, healed_plan.strategy)
+        return healed_plan
 
 
 gateway_engine_v2 = MorphGatewayEngineV2()

@@ -130,10 +130,14 @@ class MorphApiWorkflowV2:
             )
             return {"plan": plan.model_dump(), "status": "TESTING"}
 
+        prompt_text = state.get("prompt", "").lower()
+        use_custom = any(term in prompt_text for term in ("use custom script", "custom script", "custom_js", "playwright script"))
+
         # Deep Agent Autonomous Investigation (Model chooses when to use which tool)
         plan = await deep_agent_v2.autonomous_investigation(
             target_url=state["inspection_url"],
             target_schema=schema,
+            force_custom_script=use_custom,
         )
         logger.info("[LangGraph V2] Deep Agent proposed container: '%s'", plan.container_selector)
         return {"plan": plan.model_dump(), "status": "TESTING"}
@@ -185,11 +189,16 @@ class MorphApiWorkflowV2:
         error_context = f"Attempt {state.get('turn')} failed validation: {'; '.join(issues)}"
         logger.warning("[LangGraph V2] [NODE: reflect_and_heal] Turn %d/%d: %s", new_turn, state["max_turns"], error_context)
 
+        # After Attempt 1 fails, immediately shift strategy to custom Playwright script
+        force_custom_script = True
+        logger.info("[LangGraph V2] [NODE: reflect_and_heal] Hierarchical extraction failed on Attempt %d. Shifting strategy to custom Playwright script.", state.get("turn", 1))
+
         schema = state["intent"]["schema_definition"]
         plan = await deep_agent_v2.autonomous_investigation(
             target_url=state["inspection_url"],
             target_schema=schema,
             failure_context=error_context,
+            force_custom_script=force_custom_script,
         )
         return {
             "plan": plan.model_dump(),
@@ -209,7 +218,13 @@ class MorphApiWorkflowV2:
         api_key = f"mapik_{slug[:12]}_{secrets.token_hex(12)}"
         endpoint_path = f"/v2/api/{user_id}/{slug}"
         full_url = f"http://localhost:8001{endpoint_path}"
+        openapi_url = f"http://localhost:8001{endpoint_path}/openapi.json"
+        docs_url = f"http://localhost:8001{endpoint_path}/docs"
         curl_cmd = f"curl -H 'X-API-Key: {api_key}' '{full_url}'"
+
+        # Attach contract to plan if present in intent
+        if intent.get("contract"):
+            plan_dict["contract"] = intent["contract"]
 
         inputs_dict = {
             k: {
@@ -244,10 +259,15 @@ class MorphApiWorkflowV2:
             "api_key": api_key,
             "endpoint_url": endpoint_path,
             "full_endpoint_url": full_url,
+            "openapi_url": openapi_url,
+            "docs_url": docs_url,
             "curl_command": curl_cmd,
+            "contract": intent.get("contract"),
             "api_specification": {
                 "method": "GET",
                 "path": endpoint_path,
+                "openapi_url": openapi_url,
+                "docs_url": docs_url,
                 "inputs": inputs_dict,
                 "outputs": intent["schema_definition"],
                 "parameterized_url": state["target_url"],

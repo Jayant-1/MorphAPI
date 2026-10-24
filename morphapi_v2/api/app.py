@@ -4,7 +4,9 @@ FastAPI Application for MorphAPI V2
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from morphapi_v2.api.routes import router as v2_router
+from morphapi_v2.demo.mock_store import render_mock_store_html, set_mode
 from morphapi_v2.observability.correlation import CorrelationIdMiddlewareV2
 from morphapi_v2.observability.logging import RequestLoggingMiddlewareV2, setup_logging_v2
 
@@ -29,6 +31,14 @@ app.add_middleware(
 )
 
 app.include_router(v2_router)
+
+
+@app.get("/mock-store", response_class=HTMLResponse)
+@app.get("/demo/mock-store", response_class=HTMLResponse)
+async def mock_store_root(mode: str | None = None):
+    if mode:
+        set_mode(mode)
+    return render_mock_store_html(mode)
 
 
 if __name__ == "__main__":

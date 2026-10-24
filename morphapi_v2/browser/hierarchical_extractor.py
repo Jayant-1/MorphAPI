@@ -11,6 +11,7 @@ from typing import Any
 from playwright.async_api import Page
 
 from morphapi_v2.schemas.models import ContainerExtractionPlan, ExtractionResult
+from morphapi_v2.engine.type_coercer import type_coercer
 
 logger = logging.getLogger("morphapi_v2.extractor")
 
@@ -25,9 +26,48 @@ class HierarchicalExtractor:
         plan: ContainerExtractionPlan,
         target_schema: dict[str, str],
         max_records: int = 50,
+        runtime_params: dict[str, Any] | None = None,
     ) -> ExtractionResult:
         start_ts = time.monotonic()
         base_url = page.url
+
+        # Field specs for type coercion
+        field_specs = target_schema
+        if plan.contract and plan.contract.fields:
+            field_specs = {f.name: f.target_type for f in plan.contract.fields}
+
+        # Custom Playwright browser script execution
+        if plan.strategy == "custom_js" and plan.custom_js_extractor:
+            try:
+                logger.info("[HierarchicalExtractor] Executing custom Playwright script in browser sandbox with params: %s", runtime_params)
+                raw_data = await page.evaluate(plan.custom_js_extractor, runtime_params or {})
+                if not isinstance(raw_data, list) and not isinstance(raw_data, dict):
+                    raw_data = []
+
+                if isinstance(raw_data, dict):
+                    coerced = type_coercer.coerce_record(raw_data, field_specs, base_url=base_url)
+                    data_res = [coerced]
+                else:
+                    data_res = type_coercer.coerce_dataset(raw_data[:max_records], field_specs, base_url=base_url)
+
+                latency = int((time.monotonic() - start_ts) * 1000)
+                return ExtractionResult(
+                    success=True,
+                    data=data_res,
+                    count=len(data_res),
+                    latency_ms=latency,
+                    strategy_used="custom_js",
+                )
+            except Exception as e:
+                latency = int((time.monotonic() - start_ts) * 1000)
+                logger.error("[HierarchicalExtractor] Custom script execution failure: %s", e)
+                return ExtractionResult(
+                    success=False,
+                    data=None,
+                    count=0,
+                    latency_ms=latency,
+                    error_message=f"Custom browser script error: {e}",
+                )
 
         if not plan.container_selector:
             return ExtractionResult(
@@ -65,11 +105,13 @@ class HierarchicalExtractor:
 
                 dataset.append(record)
 
+            coerced_dataset = type_coercer.coerce_dataset(dataset, field_specs, base_url=base_url)
+
             latency = int((time.monotonic() - start_ts) * 1000)
             return ExtractionResult(
                 success=True,
-                data=dataset,
-                count=len(dataset),
+                data=coerced_dataset,
+                count=len(coerced_dataset),
                 latency_ms=latency,
                 strategy_used="hierarchical_dom",
             )
