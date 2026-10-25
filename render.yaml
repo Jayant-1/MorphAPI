@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: morphapi-backend
+    runtime: docker
+    plan: starter
+    region: oregon
+    envVars:
+      - key: PYTHONPATH
+        value: /app
+      - key: PLAYWRIGHT_HEADLESS
+        value: "true"
+      - key: MORPHAPI_V2_DB_PATH
+        value: /app/morphapi_v2.db
+      - key: NVIDIA_NIM_BASE_URL
+        value: https://integrate.api.nvidia.com/v1
+      - key: NVIDIA_NIM_MODEL
+        value: z-ai/glm-5.3-flash
+      - key: NVIDIA_NIM_API_KEY
+        sync: false
