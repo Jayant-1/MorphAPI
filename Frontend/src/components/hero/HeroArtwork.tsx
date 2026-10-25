@@ -56,7 +56,6 @@ export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
         className="w-full h-full object-cover object-center pointer-events-none"
       >
         <source src="/hero-background.mp4" type="video/mp4" />
-        <source src="/Cinematic_dark_mode_cloudscape_a%E2%80%A6_1080p_20261025040616.mp4" type="video/mp4" />
       </video>
 
       {/* Dark gradient overlay for text contrast */}
