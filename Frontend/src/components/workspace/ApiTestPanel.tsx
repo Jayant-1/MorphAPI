@@ -102,7 +102,8 @@ export function ApiTestPanel({ endpoint }: ApiTestPanelProps) {
 
     const queryString = queryParams.toString();
     const finalPath = queryString ? `${resolved}?${queryString}` : resolved;
-    return `http://localhost:8000${finalPath}`;
+    const baseUrl = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_MORPHAPI_V2_URL || "http://localhost:8001") : "http://localhost:8001";
+    return `${baseUrl}${finalPath}`;
   };
 
   const handleRunTest = async () => {

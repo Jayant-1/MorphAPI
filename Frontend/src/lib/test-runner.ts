@@ -25,7 +25,7 @@ async function runTests() {
   // 1. Hostname Extraction
   console.log("1. Hostname extraction tests:");
   assert(extractHostname("https://books.toscrape.com/catalogue") === "books.toscrape.com", "Extracts clean hostname from full URL");
-  assert(extractHostname("http://localhost:8000/api") === "localhost", "Extracts localhost hostname");
+  assert(extractHostname("http://localhost:8001/v2/api") === "localhost", "Extracts localhost hostname");
   assert(extractHostname("news.ycombinator.com") === "news.ycombinator.com", "Handles URLs without protocol prefix");
 
   // 2. Fixture Integrity

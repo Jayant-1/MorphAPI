@@ -32,7 +32,7 @@ export function EndpointCard({
   const [showSchema, setShowSchema] = useState(false);
   const [activeSnippetTab, setActiveSnippetTab] = useState<"curl" | "js" | "py" | "mcp">("curl");
 
-  const fullApiUrl = `http://localhost:8000${endpoint.path}`;
+  const fullApiUrl = endpoint.fullUrl || (typeof window !== "undefined" ? `${window.location.origin}${endpoint.path}` : endpoint.path);
 
   const handleCopyUrl = (e: React.MouseEvent) => {
     e.stopPropagation();

@@ -12,7 +12,7 @@ export function ProtocolsMatrix() {
       title: "Standard REST API Gateway",
       format: "cURL / HTTP 1.1",
       code: `# Fetch extracted data deterministically
-curl -X GET "http://localhost:8000/api/v1/endpoints/fastapi-releases/extract" \\
+curl -X GET "http://localhost:8001/v2/api/default/fastapi-releases" \\
   -H "Accept: application/json" \\
   -H "X-Bypass-Cache: false"
 
@@ -35,7 +35,7 @@ curl -X GET "http://localhost:8000/api/v1/endpoints/fastapi-releases/extract" \\
         "-y",
         "@morphapi/mcp-server",
         "--endpoint",
-        "http://localhost:8000/mcp/sse"
+        "http://localhost:8001/mcp/sse"
       ]
     }
   }
