@@ -1,12 +1,17 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Globe, ExternalLink, Bot } from "lucide-react";
+import { Globe, ExternalLink, Bot, ChevronDown } from "lucide-react";
 import { ChatHeader } from "@/components/chat/ChatHeader";
 import { ChatComposer } from "@/components/chat/ChatComposer";
 import { HeroArtwork } from "@/components/hero/HeroArtwork";
 import { InlineAgentActivity } from "@/components/chat/InlineAgentActivity";
 import { InlineEndpoints } from "@/components/chat/InlineEndpoints";
+import { InteractivePipeline } from "@/components/landing/InteractivePipeline";
+import { InteractionLab } from "@/components/landing/InteractionLab";
+import { ArchitectureBlueprint } from "@/components/landing/ArchitectureBlueprint";
+import { ProtocolsMatrix } from "@/components/landing/ProtocolsMatrix";
+import { MechanicalFooter } from "@/components/landing/MechanicalFooter";
 import { startRun, startFollowUpRun, ActiveRunHandle } from "@/lib/api-adapter";
 import { RunSession, ChatMessage } from "@/lib/types";
 
@@ -270,25 +275,22 @@ export default function HomePage() {
 
   // ─────────────────────────────────────────────────────────────────
   // CHAT VIEW — appears after submit. Pure single-column ChatGPT style.
-  // Storm-cloud background video with dark gradient overlay, scrollable messages, pinned composer.
+  // Solid dark #10171B background (no video background), scrollable messages, pinned composer.
   // ─────────────────────────────────────────────────────────────────
   if (inChat) {
     return (
-      <div className="relative h-screen overflow-hidden bg-[#10171B] text-[#EDF1EE] flex flex-col font-sans selection:bg-[#C3D1B8] selection:text-[#17201C]">
-        {/* Background Storm Clouds Video with Dark Overlay */}
-        <HeroArtwork dimmed={true} />
-
-        {/* Header */}
-        <ChatHeader onNewChat={handleNewChat} isDemo={isDemo} />
+      <div className="h-screen overflow-hidden bg-[#10171B] text-[#EDF1EE] flex flex-col font-sans selection:bg-[#C3D1B8] selection:text-[#17201C]">
+        {/* Header without landing nav links */}
+        <ChatHeader onNewChat={handleNewChat} isDemo={isDemo} showNavLinks={false} />
 
         {/* Scrollable messages area fills remaining height */}
-        <div className="relative z-10 flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           <div className="w-full max-w-[760px] mx-auto px-4 sm:px-6 py-8 space-y-8">
             {messages.map((msg) => (
               <div key={msg.id} className="w-full flex flex-col">
                 {msg.role === "user" ? (
                   // User bubble
-                  <div className="self-end max-w-[85%] sm:max-w-[75%] rounded-2xl bg-[#202C32]/95 backdrop-blur-sm border border-[#3A4A50] px-5 py-4 space-y-2 shadow-sm">
+                  <div className="self-end max-w-[85%] sm:max-w-[75%] rounded-2xl bg-[#202C32] border border-[#3A4A50] px-5 py-4 space-y-2 shadow-sm">
                     {msg.targetUrl && (
                       <div className="flex items-center gap-1.5 pb-2 mb-1 border-b border-[#3A4A50]/60 text-[13px] font-mono text-[#ADBAB9]">
                         <Globe className="w-3.5 h-3.5 text-[#AEC8D0] shrink-0" />
@@ -351,7 +353,7 @@ export default function HomePage() {
         </div>
 
         {/* Pinned follow-up composer */}
-        <div className="relative z-10 shrink-0 bg-gradient-to-t from-[#10171B] via-[#10171B]/95 to-transparent pb-5 pt-3">
+        <div className="shrink-0 bg-gradient-to-t from-[#10171B] via-[#10171B] to-transparent pb-5 pt-3">
           <ChatComposer
             mode="followup"
             isSubmitting={isStreaming}
@@ -363,25 +365,44 @@ export default function HomePage() {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // HERO / LANDING VIEW — full-screen cloud video, centered composer.
+  // HERO & LANDING VIEW — cloud video in hero section, followed by
+  // "How MorphAPI Works", failure analysis, architecture, protocols & footer.
+  // Full page scrolls naturally.
   // ─────────────────────────────────────────────────────────────────
   return (
-    <div className="relative min-h-screen bg-[#10171B] text-[#EDF1EE] font-sans selection:bg-[#C3D1B8] selection:text-[#17201C] flex flex-col">
-      {/* Full-screen background video */}
+    <div className="relative min-h-screen bg-[#10171B] text-[#EDF1EE] font-sans selection:bg-[#C3D1B8] selection:text-[#17201C] flex flex-col overflow-x-hidden">
+      {/* Cloudscape background video in hero section */}
       <HeroArtwork dimmed={false} />
 
-      {/* Header with V2 status */}
-      <ChatHeader onNewChat={handleNewChat} />
+      {/* Header with section navigation links & V2 status */}
+      <ChatHeader onNewChat={handleNewChat} isDemo={isDemo} showNavLinks={true} />
 
-      {/* Centered composer in viewport */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 sm:px-6 py-12">
+      {/* Hero Section with Composer */}
+      <section className="relative z-10 w-full min-h-[calc(100vh-3.5rem)] min-h-[calc(100dvh-3.5rem)] flex flex-col items-center justify-center px-4 sm:px-6 py-12">
         <ChatComposer
           mode="initial"
           isSubmitting={isStreaming}
           onSubmitInitial={handleStartInitialRun}
           onSelectSample={(url, prompt) => handleStartInitialRun(url, prompt)}
         />
-      </main>
+
+        {/* Scroll indicator to prompt user down to landing content */}
+        <div className="mt-8 flex flex-col items-center gap-1.5 text-xs text-[#ADBAB9]/70 font-sans select-none animate-bounce">
+          <a href="#how-it-works" className="flex items-center gap-1 hover:text-[#C3D1B8] transition-colors">
+            <span>Explore how MorphAPI works</span>
+            <ChevronDown className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      </section>
+
+      {/* Landing Page Content: How It Works, Failure Lab, Architecture AST, Protocols, Footer */}
+      <div className="relative z-10 w-full bg-[#09090C] border-t border-[#1A1A20]">
+        <InteractivePipeline />
+        <InteractionLab />
+        <ArchitectureBlueprint />
+        <ProtocolsMatrix />
+        <MechanicalFooter />
+      </div>
     </div>
   );
 }

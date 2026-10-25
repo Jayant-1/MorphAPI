@@ -7,9 +7,10 @@ import { checkV2HealthDetails, listStoredEndpoints, getV2BaseUrl } from "@/lib/a
 interface ChatHeaderProps {
   onNewChat: () => void;
   isDemo?: boolean;
+  showNavLinks?: boolean;
 }
 
-export function ChatHeader({ onNewChat, isDemo = false }: ChatHeaderProps) {
+export function ChatHeader({ onNewChat, isDemo = false, showNavLinks = false }: ChatHeaderProps) {
   const [health, setHealth] = useState<{ connected: boolean; url: string; version?: string } | null>(null);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [storedEndpoints, setStoredEndpoints] = useState<any[]>([]);
@@ -71,6 +72,45 @@ export function ChatHeader({ onNewChat, isDemo = false }: ChatHeaderProps) {
             </div>
           )}
         </div>
+
+        {/* Center: Landing Page Navigation Links */}
+        {showNavLinks && (
+          <nav className="hidden md:flex items-center gap-1 text-[13px] text-[#ADBAB9] font-sans">
+            <a
+              href="#how-it-works"
+              className="px-3 py-1.5 rounded-md hover:text-[#EDF1EE] hover:bg-[#202C32] transition-colors"
+            >
+              How It Works
+            </a>
+            <a
+              href="#failure-analysis"
+              className="px-3 py-1.5 rounded-md hover:text-[#EDF1EE] hover:bg-[#202C32] transition-colors"
+            >
+              Failure Analysis
+            </a>
+            <a
+              href="#architecture"
+              className="px-3 py-1.5 rounded-md hover:text-[#EDF1EE] hover:bg-[#202C32] transition-colors"
+            >
+              Architecture
+            </a>
+            <a
+              href="#protocols"
+              className="px-3 py-1.5 rounded-md hover:text-[#EDF1EE] hover:bg-[#202C32] transition-colors"
+            >
+              Protocols
+            </a>
+            <a
+              href="https://github.com/Jayant-1/MorphAPI"
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-1.5 rounded-md hover:text-[#EDF1EE] hover:bg-[#202C32] transition-colors inline-flex items-center gap-1 text-[#C3D1B8]"
+            >
+              <span>GitHub</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </nav>
+        )}
 
         {/* Actions: Stored Endpoints & New Chat */}
         <div className="flex items-center gap-2">
