@@ -47,6 +47,16 @@ export default function HomePage() {
     setIsStreaming(false);
   };
 
+  const handleGoLanding = () => {
+    handleNewChat();
+    if (typeof window !== "undefined") {
+      if (window.location.hash || window.location.search) {
+        window.history.pushState(null, "", "/");
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   const handleStartInitialRun = (
     url: string,
     prompt: string,
@@ -281,7 +291,7 @@ export default function HomePage() {
     return (
       <div className="h-screen overflow-hidden bg-[#10171B] text-[#EDF1EE] flex flex-col font-sans selection:bg-[#C3D1B8] selection:text-[#17201C]">
         {/* Header without landing nav links */}
-        <ChatHeader onNewChat={handleNewChat} isDemo={isDemo} showNavLinks={false} />
+        <ChatHeader onNewChat={handleNewChat} onGoLanding={handleGoLanding} isDemo={isDemo} showNavLinks={false} />
 
         {/* Scrollable messages area fills remaining height */}
         <div className="flex-1 overflow-y-auto">
@@ -375,7 +385,7 @@ export default function HomePage() {
       <HeroArtwork dimmed={false} />
 
       {/* Header with section navigation links & V2 status */}
-      <ChatHeader onNewChat={handleNewChat} isDemo={isDemo} showNavLinks={true} />
+      <ChatHeader onNewChat={handleNewChat} onGoLanding={handleGoLanding} isDemo={isDemo} showNavLinks={true} />
 
       {/* Hero Section with Composer */}
       <section className="relative z-10 w-full min-h-[calc(100vh-3.5rem)] min-h-[calc(100dvh-3.5rem)] flex flex-col items-center justify-center px-4 sm:px-6 py-12">

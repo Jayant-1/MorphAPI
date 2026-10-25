@@ -8,30 +8,88 @@ interface HeroArtworkProps {
 }
 
 export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRefA = useRef<HTMLVideoElement>(null);
+  const videoRefB = useRef<HTMLVideoElement>(null);
+  const [activeTrack, setActiveTrack] = useState<"A" | "B">("A");
   const [isPlaying, setIsPlaying] = useState(true);
 
+  // Crossfade duration: 2.2s seamless blend between track endpoints
+  const FADE_DURATION = 2.2;
+
   useEffect(() => {
-    // Respect reduced-motion preferences
     const prefersReducedMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    if (prefersReducedMotion && videoRef.current) {
-      videoRef.current.pause();
+    if (prefersReducedMotion) {
+      videoRefA.current?.pause();
+      videoRefB.current?.pause();
       setIsPlaying(false);
+      return;
+    }
+
+    const vidA = videoRefA.current;
+    if (vidA) {
+      vidA.playbackRate = 0.85;
+      vidA.play().catch(() => {});
     }
   }, []);
 
+  // Time update monitoring on Track A to initiate seamless crossfade into Track B
+  const handleTimeUpdateA = () => {
+    const vidA = videoRefA.current;
+    const vidB = videoRefB.current;
+    if (!vidA || !vidB) return;
+
+    if (activeTrack === "A" && vidA.duration && vidA.currentTime >= vidA.duration - FADE_DURATION) {
+      vidB.currentTime = 0;
+      vidB.playbackRate = 0.85;
+      vidB.play().catch(() => {});
+      setActiveTrack("B");
+    }
+  };
+
+  // Time update monitoring on Track B to initiate seamless crossfade into Track A
+  const handleTimeUpdateB = () => {
+    const vidA = videoRefA.current;
+    const vidB = videoRefB.current;
+    if (!vidA || !vidB) return;
+
+    if (activeTrack === "B" && vidB.duration && vidB.currentTime >= vidB.duration - FADE_DURATION) {
+      vidA.currentTime = 0;
+      vidA.playbackRate = 0.85;
+      vidA.play().catch(() => {});
+      setActiveTrack("A");
+    }
+  };
+
+  const handleEndedA = () => {
+    if (videoRefA.current) {
+      videoRefA.current.pause();
+      videoRefA.current.currentTime = 0;
+    }
+  };
+
+  const handleEndedB = () => {
+    if (videoRefB.current) {
+      videoRefB.current.pause();
+      videoRefB.current.currentTime = 0;
+    }
+  };
+
   const togglePlayback = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!videoRef.current) return;
+    const vidA = videoRefA.current;
+    const vidB = videoRefB.current;
+    if (!vidA || !vidB) return;
 
-    if (videoRef.current.paused) {
-      videoRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-    } else {
-      videoRef.current.pause();
+    if (isPlaying) {
+      vidA.pause();
+      vidB.pause();
       setIsPlaying(false);
+    } else {
+      const current = activeTrack === "A" ? vidA : vidB;
+      current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
     }
   };
 
@@ -42,28 +100,43 @@ export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
       }`}
       aria-hidden="true"
     >
-      {/* Cinematic Storm Cloudscape Video Background with Fallback Poster */}
+      {/* Seamless Track A */}
       <video
-        ref={videoRef}
+        ref={videoRefA}
         autoPlay
-        loop
         muted
         playsInline
         preload="auto"
-        poster="/hero-artwork.jpg"
-        onPlaying={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        className="w-full h-full object-cover object-center pointer-events-none"
+        onTimeUpdate={handleTimeUpdateA}
+        onEnded={handleEndedA}
+        className={`absolute inset-0 w-full h-full object-cover object-center pointer-events-none transition-opacity duration-[2200ms] ease-in-out ${
+          activeTrack === "A" ? "opacity-100 z-10" : "opacity-0 z-0"
+        }`}
+      >
+        <source src="/hero-background.mp4" type="video/mp4" />
+      </video>
+
+      {/* Seamless Track B (Crossfades seamlessly with Track A for infinite loop) */}
+      <video
+        ref={videoRefB}
+        muted
+        playsInline
+        preload="auto"
+        onTimeUpdate={handleTimeUpdateB}
+        onEnded={handleEndedB}
+        className={`absolute inset-0 w-full h-full object-cover object-center pointer-events-none transition-opacity duration-[2200ms] ease-in-out ${
+          activeTrack === "B" ? "opacity-100 z-10" : "opacity-0 z-0"
+        }`}
       >
         <source src="/hero-background.mp4" type="video/mp4" />
       </video>
 
       {/* Dark gradient overlay for text contrast */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[#10171B]/55 via-[#10171B]/60 to-[#10171B]/85 pointer-events-none" />
+      <div className="absolute inset-0 z-20 bg-gradient-to-b from-[#10171B]/55 via-[#10171B]/60 to-[#10171B]/85 pointer-events-none" />
 
       {/* Discreet Video Pause/Play Control — only shown in hero (not dimmed) */}
       {!dimmed && (
-        <div className="absolute bottom-4 right-4 z-20 pointer-events-auto">
+        <div className="absolute bottom-4 right-4 z-30 pointer-events-auto">
           <button
             type="button"
             onClick={togglePlayback}

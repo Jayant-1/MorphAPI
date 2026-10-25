@@ -558,7 +558,7 @@ export async function executeEndpointTest(
   const baseUrl = getV2BaseUrl();
 
   // If this is an explicit demo endpoint without a real V2 backend URL
-  if (endpoint.id.startsWith("ep_catalog_") && !endpoint.fullUrl) {
+  if (endpoint.sampleResponse && !endpoint.fullUrl && endpoint.id !== "ep_failing_route") {
     await new Promise((r) => setTimeout(r, 90));
     const duration = Math.round(performance.now() - startTime);
     return {
@@ -573,6 +573,26 @@ export async function executeEndpointTest(
       executedAt: new Date().toISOString(),
       method: selectedMethod,
       isDemoSample: true,
+    };
+  }
+
+  // Simulated failure endpoint
+  if (endpoint.id === "ep_failing_route") {
+    await new Promise((r) => setTimeout(r, 60));
+    const duration = Math.round(performance.now() - startTime);
+    return {
+      endpointId: endpoint.id,
+      status: 404,
+      statusText: "Not Found",
+      durationMs: duration,
+      sizeBytes: 42,
+      headers: { "content-type": "application/json" },
+      data: { error: "404 Not Found", detail: "Target resource sku 'missing-sku-999' was not found in catalog." },
+      rawText: JSON.stringify({ error: "404 Not Found", detail: "Target resource sku 'missing-sku-999' was not found in catalog." }, null, 2),
+      executedAt: new Date().toISOString(),
+      method: selectedMethod,
+      isError: true,
+      errorMessage: "HTTP 404 Not Found: Target resource sku 'missing-sku-999' was not found in catalog.",
     };
   }
 
