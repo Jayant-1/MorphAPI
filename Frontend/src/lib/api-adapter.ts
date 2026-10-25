@@ -234,7 +234,7 @@ export function startRun(
   // ─────────────────────────────────────────────────────────────────────────────
   // OPT-IN DEMO MODE: Only if forceDemo is explicitly requested
   // ─────────────────────────────────────────────────────────────────────────────
-  if (options.forceDemo) {
+  if (options.forceDemo || (options.fixtureId && options.fixtureId in DEMO_FIXTURES)) {
     let fixture: DemoFixture | null = null;
     if (options.fixtureId && DEMO_FIXTURES[options.fixtureId]) {
       fixture = DEMO_FIXTURES[options.fixtureId];
@@ -280,6 +280,10 @@ export function startRun(
         ...demoSession,
         status: "processing",
         connectionStatus: "streaming",
+        endpoints: fixture.endpoints.slice(0, 2).map((ep) => ({
+          ...ep,
+          status: "validating" as const,
+        })),
         steps: fixture.steps.map((s, idx) => ({
           ...s,
           status: idx === 0 ? "success" : idx === 1 ? "running" : "pending",
@@ -288,7 +292,7 @@ export function startRun(
         logs: fixture.logs.slice(0, 2),
       };
       options.onUpdate(runningSession);
-    }, 600);
+    }, 200);
 
     scheduleTimeout(() => {
       if (isCancelled) return;
@@ -303,9 +307,30 @@ export function startRun(
       };
       options.onUpdate(completedSession);
       options.onComplete?.(completedSession);
-    }, 1800);
+    }, 500);
 
-    return { runId, stop: cleanup };
+    return {
+      runId,
+      stop: () => {
+        cleanup();
+        const stoppedSession: RunSession = {
+          ...demoSession,
+          status: "stopped",
+          connectionStatus: "closed",
+          logs: [
+            ...demoSession.logs,
+            {
+              id: "log_stop",
+              timestamp: new Date().toLocaleTimeString(),
+              severity: "warning",
+              source: "LangGraph",
+              message: "Demo simulation cancelled by user.",
+            },
+          ],
+        };
+        options.onUpdate(stoppedSession);
+      },
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
