@@ -13,8 +13,12 @@ export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
   const [activeTrack, setActiveTrack] = useState<"A" | "B">("A");
   const [isPlaying, setIsPlaying] = useState(true);
 
-  // Crossfade duration: 2.2s seamless blend between track endpoints
+  const activeTrackRef = useRef<"A" | "B">("A");
+  const isFadingRef = useRef(false);
+
+  // Crossfade duration: 2.2s seamless blend
   const FADE_DURATION = 2.2;
+  const PLAYBACK_RATE = 0.85;
 
   useEffect(() => {
     const prefersReducedMotion =
@@ -30,66 +34,81 @@ export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
 
     const vidA = videoRefA.current;
     if (vidA) {
-      vidA.playbackRate = 0.85;
+      vidA.playbackRate = PLAYBACK_RATE;
       vidA.play().catch(() => {});
     }
+
+    // High-precision monitor to execute seamless crossfade before either track ends
+    const interval = setInterval(() => {
+      const currentTrack = activeTrackRef.current;
+      const activeVideo = currentTrack === "A" ? videoRefA.current : videoRefB.current;
+      const nextVideo = currentTrack === "A" ? videoRefB.current : videoRefA.current;
+
+      if (!activeVideo || !nextVideo) return;
+
+      const duration = activeVideo.duration;
+      const currentTime = activeVideo.currentTime;
+
+      if (duration && currentTime >= duration - FADE_DURATION && !isFadingRef.current) {
+        isFadingRef.current = true;
+        const nextTrack = currentTrack === "A" ? "B" : "A";
+
+        // Prime and play the incoming video from 0s
+        nextVideo.currentTime = 0;
+        nextVideo.playbackRate = PLAYBACK_RATE;
+        nextVideo.play().catch(() => {});
+
+        // Swap active track to trigger CSS crossfade
+        activeTrackRef.current = nextTrack;
+        setActiveTrack(nextTrack);
+
+        // After crossfade finishes, pause the outgoing track so it rests silently at 0s
+        setTimeout(() => {
+          activeVideo.pause();
+          activeVideo.currentTime = 0;
+          isFadingRef.current = false;
+        }, (FADE_DURATION + 0.3) * 1000);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
   }, []);
 
-  // Time update monitoring on Track A to initiate seamless crossfade into Track B
-  const handleTimeUpdateA = () => {
+  const togglePlayback = (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     const vidA = videoRefA.current;
     const vidB = videoRefB.current;
     if (!vidA || !vidB) return;
 
-    if (activeTrack === "A" && vidA.duration && vidA.currentTime >= vidA.duration - FADE_DURATION) {
-      vidB.currentTime = 0;
-      vidB.playbackRate = 0.85;
-      vidB.play().catch(() => {});
-      setActiveTrack("B");
-    }
-  };
+    // Direct check of actual video hardware status
+    const isCurrentlyPlaying = (!vidA.paused && !vidA.ended) || (!vidB.paused && !vidB.ended);
 
-  // Time update monitoring on Track B to initiate seamless crossfade into Track A
-  const handleTimeUpdateB = () => {
-    const vidA = videoRefA.current;
-    const vidB = videoRefB.current;
-    if (!vidA || !vidB) return;
-
-    if (activeTrack === "B" && vidB.duration && vidB.currentTime >= vidB.duration - FADE_DURATION) {
-      vidA.currentTime = 0;
-      vidA.playbackRate = 0.85;
-      vidA.play().catch(() => {});
-      setActiveTrack("A");
-    }
-  };
-
-  const handleEndedA = () => {
-    if (videoRefA.current) {
-      videoRefA.current.pause();
-      videoRefA.current.currentTime = 0;
-    }
-  };
-
-  const handleEndedB = () => {
-    if (videoRefB.current) {
-      videoRefB.current.pause();
-      videoRefB.current.currentTime = 0;
-    }
-  };
-
-  const togglePlayback = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const vidA = videoRefA.current;
-    const vidB = videoRefB.current;
-    if (!vidA || !vidB) return;
-
-    if (isPlaying) {
+    if (isCurrentlyPlaying) {
       vidA.pause();
       vidB.pause();
       setIsPlaying(false);
     } else {
-      const current = activeTrack === "A" ? vidA : vidB;
-      current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+      const currentTrack = activeTrackRef.current;
+      const targetVideo = currentTrack === "A" ? vidA : vidB;
+      if (targetVideo.ended) {
+        targetVideo.currentTime = 0;
+      }
+      targetVideo
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch(() => {
+          if (vidA) {
+            vidA.currentTime = 0;
+            vidA.play().then(() => {
+              activeTrackRef.current = "A";
+              setActiveTrack("A");
+              setIsPlaying(true);
+            }).catch(() => {});
+          }
+        });
     }
   };
 
@@ -98,7 +117,6 @@ export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
       className={`fixed inset-0 select-none overflow-hidden transition-opacity duration-500 pointer-events-none ${
         dimmed ? "opacity-30" : "opacity-100"
       }`}
-      aria-hidden="true"
     >
       {/* Seamless Track A */}
       <video
@@ -107,8 +125,12 @@ export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
         muted
         playsInline
         preload="auto"
-        onTimeUpdate={handleTimeUpdateA}
-        onEnded={handleEndedA}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => {
+          if ((videoRefA.current?.paused ?? true) && (videoRefB.current?.paused ?? true)) {
+            setIsPlaying(false);
+          }
+        }}
         className={`absolute inset-0 w-full h-full object-cover object-center pointer-events-none transition-opacity duration-[2200ms] ease-in-out ${
           activeTrack === "A" ? "opacity-100 z-10" : "opacity-0 z-0"
         }`}
@@ -122,8 +144,12 @@ export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
         muted
         playsInline
         preload="auto"
-        onTimeUpdate={handleTimeUpdateB}
-        onEnded={handleEndedB}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => {
+          if ((videoRefA.current?.paused ?? true) && (videoRefB.current?.paused ?? true)) {
+            setIsPlaying(false);
+          }
+        }}
         className={`absolute inset-0 w-full h-full object-cover object-center pointer-events-none transition-opacity duration-[2200ms] ease-in-out ${
           activeTrack === "B" ? "opacity-100 z-10" : "opacity-0 z-0"
         }`}
@@ -136,19 +162,22 @@ export function HeroArtwork({ dimmed = false }: HeroArtworkProps) {
 
       {/* Discreet Video Pause/Play Control — only shown in hero (not dimmed) */}
       {!dimmed && (
-        <div className="absolute bottom-4 right-4 z-30 pointer-events-auto">
+        <div
+          onClick={togglePlayback}
+          className="absolute bottom-4 right-4 z-30 pointer-events-auto cursor-pointer"
+        >
           <button
             type="button"
             onClick={togglePlayback}
-            className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#202C32]/80 hover:bg-[#2A3940] border border-[#3A4A50] text-[#ADBAB9] hover:text-[#EDF1EE] flex items-center justify-center transition-colors focus:outline-hidden focus:ring-1 focus:ring-[#AEC8D0]"
+            className="w-8 h-8 rounded-lg bg-[#202C32]/90 hover:bg-[#2A3940] border border-[#3A4A50] text-[#ADBAB9] hover:text-[#EDF1EE] flex items-center justify-center transition-colors shadow-lg cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-[#AEC8D0]"
             title={isPlaying ? "Pause background clouds video" : "Play background clouds video"}
             aria-label={isPlaying ? "Pause background clouds video" : "Play background clouds video"}
             aria-pressed={!isPlaying}
           >
             {isPlaying ? (
-              <Pause className="w-3 h-3 text-[#ADBAB9]" />
+              <Pause className="w-3.5 h-3.5 text-[#ADBAB9]" />
             ) : (
-              <Play className="w-3 h-3 text-[#ADBAB9] ml-0.5" />
+              <Play className="w-3.5 h-3.5 text-[#ADBAB9] ml-0.5" />
             )}
           </button>
         </div>

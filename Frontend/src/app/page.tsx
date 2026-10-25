@@ -387,17 +387,19 @@ export default function HomePage() {
       {/* Header with section navigation links & V2 status */}
       <ChatHeader onNewChat={handleNewChat} onGoLanding={handleGoLanding} isDemo={isDemo} showNavLinks={true} />
 
-      {/* Hero Section with Composer */}
-      <section className="relative z-10 w-full min-h-[calc(100vh-3.5rem)] min-h-[calc(100dvh-3.5rem)] flex flex-col items-center justify-center px-4 sm:px-6 py-12">
-        <ChatComposer
-          mode="initial"
-          isSubmitting={isStreaming}
-          onSubmitInitial={handleStartInitialRun}
-          onSelectSample={(url, prompt) => handleStartInitialRun(url, prompt)}
-        />
+      {/* Hero Section with Composer — pointer-events-none on backdrop allows bottom-right controls to receive clicks */}
+      <section className="relative z-10 w-full min-h-[calc(100vh-3.5rem)] min-h-[calc(100dvh-3.5rem)] flex flex-col items-center justify-center px-4 sm:px-6 py-12 pointer-events-none">
+        <div className="w-full flex justify-center pointer-events-auto">
+          <ChatComposer
+            mode="initial"
+            isSubmitting={isStreaming}
+            onSubmitInitial={handleStartInitialRun}
+            onSelectSample={(url, prompt) => handleStartInitialRun(url, prompt)}
+          />
+        </div>
 
         {/* Scroll indicator to prompt user down to landing content */}
-        <div className="mt-8 flex flex-col items-center gap-1.5 text-xs text-[#ADBAB9]/70 font-sans select-none animate-bounce">
+        <div className="mt-8 flex flex-col items-center gap-1.5 text-xs text-[#ADBAB9]/70 font-sans select-none animate-bounce pointer-events-auto">
           <a href="#how-it-works" className="flex items-center gap-1 hover:text-[#C3D1B8] transition-colors">
             <span>Explore how MorphAPI works</span>
             <ChevronDown className="w-3.5 h-3.5" />
